@@ -37,28 +37,47 @@
     while (logEl.children.length > 5) logEl.removeChild(logEl.lastChild);
   }
 
-  // ---------- HUD ----------
+  // ---------- HUD (v15: limpio y contextual — manos + mochila, sin barras) ----------
+  const ICONOS_INV = {
+    agua_almendras: 'refresco', botiquin: 'botiquin', linterna: 'linterna',
+    chaqueta: 'chaqueta', amuleto: 'cuadro', llave_nivel: 'llave',
+    tuberia: 'tuberia', fuego_griego: 'fuego', guante_paralisis: 'guante',
+    detector: 'antena', trebol: 'trebol',
+  };
+
   function updateHUD() {
     if (!world.player || !world.level) return;
-    $('bar-salud').style.width = world.player.salud + '%';
-    $('bar-cordura').style.width = world.player.cordura + '%';
-    $('bar-sed').style.width = world.player.sed + '%';
-    $('bar-hambre').style.width = world.player.hambre + '%';
     $('hud-level').textContent = `${world.level.wikiTitle} · Peligro ${world.level.peligro}/5`;
-    $('hud-turn').textContent = `Turno ${world.turn}`;
-    const seedEl = $('hud-seed');
-    seedEl.textContent = '';
-    if (window.Icons) seedEl.appendChild(Icons.img('dado', 13));
-    seedEl.appendChild(document.createTextNode(' ' + world.runSeed));
+    renderManos();
+    if ($('backpack-panel').style.display !== 'none') renderBackpack();
+  }
 
-    const ICONOS_INV = {
-      agua_almendras: 'refresco', botiquin: 'botiquin', linterna: 'linterna',
-      chaqueta: 'chaqueta', amuleto: 'cuadro', llave_nivel: 'llave',
-      tuberia: 'tuberia', fuego_griego: 'fuego', guante_paralisis: 'guante',
-      detector: 'antena', trebol: 'trebol',
-    };
-    const inv = $('hud-inv');
-    inv.innerHTML = '';
+  function renderManos() {
+    const manos = world.player.manos || [null, null];
+    for (let m = 0; m < 2; m++) {
+      const el = $('mano-' + m);
+      el.innerHTML = '';
+      el.classList.remove('activa');
+      const id = manos[m];
+      if (id === '=') {
+        el.title = 'Ocupada por el objeto a dos manos';
+        el.textContent = '·';
+        continue;
+      }
+      if (id) {
+        const def = world.data.objects[id];
+        if (window.Icons) el.appendChild(Icons.img(ICONOS_INV[id] || 'interrogante', 24));
+        el.title = `${def.nombre} (clic: guardar en la mochila)`;
+        if (id === 'linterna' && world.player.luz) el.classList.add('activa');
+      } else {
+        el.title = (m === 0 ? 'Mano izquierda' : 'Mano derecha') + ' (vacía)';
+      }
+    }
+  }
+
+  function renderBackpack() {
+    const cont = $('backpack-slots');
+    cont.innerHTML = '';
     for (let i = 0; i < 6; i++) {
       const slot = document.createElement('div');
       slot.className = 'inv-slot';
@@ -69,13 +88,41 @@
       if (id) {
         const def = world.data.objects[id];
         const ic = ICONOS_INV[id] || 'interrogante';
-        slot.appendChild(window.Icons ? Icons.img(ic, 22) : document.createTextNode('?'));
+        slot.appendChild(window.Icons ? Icons.img(ic, 24) : document.createTextNode('?'));
         slot.title = `${def.nombre} — ${def.descripcion}`;
-        if (id === 'linterna' && world.player.luz) slot.classList.add('active');
+        slot.draggable = true;
+        slot.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', String(i)));
         slot.onclick = () => showItemInfo(i, ic);
       }
-      inv.appendChild(slot);
+      cont.appendChild(slot);
     }
+  }
+
+  function backpackAbierta() { return $('backpack-panel').style.display !== 'none'; }
+  function toggleBackpack(force) {
+    const vis = force !== undefined ? force : !backpackAbierta();
+    $('backpack-panel').style.display = vis ? 'flex' : 'none';
+    if (vis) renderBackpack();
+    if (window.Sfx) Sfx.play('ui');
+    if (world.level && !world.over) {
+      if (vis) world.busy = true;
+      else if ($('exit-modal').style.display === 'none' &&
+               $('dice-overlay').style.display === 'none' &&
+               $('choice-modal').style.display === 'none' &&
+               $('item-modal').style.display === 'none') world.busy = false;
+    }
+  }
+
+  // manos: clic desequipa; soltar un objeto arrastrado desde la mochila equipa
+  for (const m of [0, 1]) {
+    const el = $('mano-' + m);
+    el.onclick = () => Game.desequipar(m);
+    el.addEventListener('dragover', (e) => e.preventDefault());
+    el.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const s = e.dataTransfer.getData('text/plain');
+      if (s !== '') Game.equipar(parseInt(s, 10));
+    });
   }
 
   // ---------- ventana de información de objeto ----------
@@ -117,12 +164,16 @@
     const btnUse = $('btn-item-use');
     btnUse.style.display = usable ? 'inline-block' : 'none';
     btnUse.onclick = () => { cerrarItemInfo(); Game.useItem(slot); };
+    const btnEq = $('btn-item-equip');
+    btnEq.style.display = def.manos ? 'inline-block' : 'none';
+    btnEq.onclick = () => { cerrarItemInfo(); Game.equipar(slot); };
     $('btn-item-close').onclick = cerrarItemInfo;
     $('item-modal').style.display = 'flex';
   }
   function cerrarItemInfo() {
     $('item-modal').style.display = 'none';
-    if ($('exit-modal').style.display === 'none' && $('dice-overlay').style.display === 'none')
+    if ($('exit-modal').style.display === 'none' && $('dice-overlay').style.display === 'none' &&
+        $('choice-modal').style.display === 'none' && !backpackAbierta())
       world.busy = false;
   }
 
@@ -194,12 +245,17 @@
   function showExitModal(def) {
     exitDefShown = def;
     world.busy = true;
+    // colección: ver una salida la desbloquea en el códice (las de retorno no cuentan)
+    if (def.tipo !== 'retorno' && world.level)
+      Game.Profiles.registrarDescubierto('salidas', `${world.level.id}::${def.texto}`);
     $('exit-modal').style.display = 'flex';
     $('exit-text').textContent = def.texto;
     const warn = $('exit-warn');
     const destinoNombre = def.destino && world.data.levels[def.destino]
       ? world.data.levels[def.destino].wikiTitle : null;
-    if (def.tipo === 'escape') warn.textContent = '⭐ Parece un camino de vuelta a la realidad.';
+    if (def.tipo === 'retorno')
+      warn.textContent = `↩ Volver por donde viniste → ${destinoNombre ?? '???'}`;
+    else if (def.tipo === 'escape') warn.textContent = '⭐ Parece un camino de vuelta a la realidad.';
     else if (def.tipo === 'sellada') warn.textContent = '⌀ El camino se pierde en niveles sin cartografiar.';
     else if (def.tipo === 'llave') warn.textContent = '🗝 Requiere una Llave de Nivel.';
     else if (def.tipo === 'arriesgada' && def.riesgoVoid > 0)
@@ -236,6 +292,30 @@
       $('btn-cross').style.display = '';
       world.busy = false;
     };
+  }
+
+  // ---------- elección libre (beber agua, rituales…) ----------
+  function showChoice(titulo, texto, opciones) {
+    world.busy = true;
+    $('choice-title').textContent = titulo;
+    $('choice-text').textContent = texto;
+    const btns = $('choice-btns');
+    btns.innerHTML = '';
+    opciones.forEach((op, i) => {
+      const b = document.createElement('button');
+      b.className = i === 0 ? 'btn-big' : 'btn-small';
+      if (i === 0) { b.style.fontSize = '12px'; b.style.padding = '11px 20px'; }
+      b.textContent = op.label;
+      b.onclick = () => {
+        $('choice-modal').style.display = 'none';
+        if ($('exit-modal').style.display === 'none' && $('dice-overlay').style.display === 'none')
+          world.busy = false;
+        if (window.Sfx) Sfx.play('ui');
+        if (op.cb) op.cb();
+      };
+      btns.appendChild(b);
+    });
+    $('choice-modal').style.display = 'flex';
   }
 
   // ---------- diario ----------
@@ -293,6 +373,90 @@
       li.textContent = `${h.fecha} · semilla «${h.semilla}» · ${h.niveles} niveles, ${h.turnos} turnos · ${h.resultado}`;
       hiEl.appendChild(li);
     }
+    renderColeccion(perfil);
+  }
+
+  // ---------- Colección (v15): coleccionables con «???» hasta descubrirlos ----------
+  function silueta(glyph) {
+    const spr = Sprites.get(glyph, 0);
+    if (!spr) return null;
+    const c = document.createElement('canvas');
+    c.width = spr.width; c.height = spr.height;
+    const x = c.getContext('2d');
+    x.drawImage(spr, 0, 0);
+    x.globalCompositeOperation = 'source-in';   // solo tiñe los píxeles del sprite
+    x.fillStyle = '#15130e';
+    x.fillRect(0, 0, c.width, c.height);
+    return c.toDataURL();
+  }
+
+  function renderColeccion(perfil) {
+    const desc = perfil.descubiertos || { salidas: {}, entidades: {}, objetos: {} };
+
+    // entidades: sprite real si la has visto; silueta negra y ??? si no
+    const entEl = $('codex-entidades');
+    entEl.innerHTML = '';
+    let vistas = 0;
+    const ents = Object.values(world.data.entities);
+    for (const def of ents) {
+      const visto = !!desc.entidades[def.id];
+      if (visto) vistas++;
+      const card = document.createElement('div');
+      card.className = 'col-card' + (visto ? '' : ' col-locked');
+      const spr = visto ? Sprites.get(def.glyph, 0) : null;
+      const img = document.createElement('img');
+      img.className = 'icono';
+      img.style.width = img.style.height = '40px';
+      img.src = spr ? spr.toDataURL() : (silueta(def.glyph) || (window.Icons ? Icons.url('interrogante') : ''));
+      card.appendChild(img);
+      const nom = document.createElement('div');
+      nom.textContent = visto ? def.nombre : '???';
+      card.appendChild(nom);
+      if (visto) card.title = def.descripcion || def.nombre;
+      entEl.appendChild(card);
+    }
+    entEl.insertAdjacentHTML('afterbegin',
+      `<p class="col-cuenta">${vistas}/${ents.length} avistadas</p>`);
+
+    // objetos
+    const objEl = $('codex-objetos');
+    objEl.innerHTML = '';
+    let habidos = 0;
+    const objs = Object.values(world.data.objects);
+    for (const def of objs) {
+      const visto = !!desc.objetos[def.id];
+      if (visto) habidos++;
+      const card = document.createElement('div');
+      card.className = 'col-card' + (visto ? '' : ' col-locked');
+      if (window.Icons)
+        card.appendChild(Icons.img(visto ? (ICONOS_INV[def.id] || 'interrogante') : 'interrogante', 32));
+      const nom = document.createElement('div');
+      nom.textContent = visto ? def.nombre : '???';
+      card.appendChild(nom);
+      if (visto) card.title = def.descripcion || def.nombre;
+      objEl.appendChild(card);
+    }
+    objEl.insertAdjacentHTML('afterbegin',
+      `<p class="col-cuenta">${habidos}/${objs.length} conseguidos</p>`);
+
+    // salidas por nivel (solo niveles que ya pisaste: sin spoilers del resto)
+    const salEl = $('codex-salidas');
+    salEl.innerHTML = '';
+    for (const id of Object.keys(perfil.codice)) {
+      const lv = world.data.levels[id];
+      if (!lv || !(lv.salidas || []).length) continue;
+      const halladas = lv.salidas.filter((s) => desc.salidas[`${id}::${s.texto}`]);
+      const div = document.createElement('div');
+      div.className = 'col-nivel';
+      const ul = lv.salidas.map((s) =>
+        desc.salidas[`${id}::${s.texto}`]
+          ? `<li>${s.texto}</li>`
+          : '<li class="col-locked">??? — sin descubrir</li>').join('');
+      div.innerHTML = `<b>${lv.wikiTitle}</b> <span class="col-cuenta">salidas ${halladas.length}/${lv.salidas.length}</span><ul>${ul}</ul>`;
+      salEl.appendChild(div);
+    }
+    if (!salEl.children.length)
+      salEl.innerHTML = '<p class="codex-records">Explora niveles para catalogar sus salidas.</p>';
   }
 
   let codexVisible = false;
@@ -326,7 +490,8 @@
 
   world.ui = {
     log, updateHUD, flashDamage, showLevelCard, showDice,
-    showExitModal, showLevelPicker, toggleJournal, showEnd, show, toggleCodex,
+    showExitModal, showLevelPicker, showChoice, toggleJournal, showEnd, show, toggleCodex,
+    toggleBackpack,
     get flashT() { return flashT; },
   };
 })();

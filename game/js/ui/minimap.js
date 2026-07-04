@@ -55,15 +55,17 @@
   function toggleBig(force) {
     bigVisible = force !== undefined ? force : !bigVisible;
     bigWrap.style.display = bigVisible ? 'flex' : 'none';
+    if (window.Sfx) Sfx.play('ui');
   }
 
-  small.addEventListener('click', () => toggleBig(true));
+  if (small) small.addEventListener('click', () => toggleBig(true));
   bigWrap.addEventListener('click', () => toggleBig(false));
 
   window.Minimap = {
     frame(world, t) {
       if (!world.level || !world.map) return;
-      render(small, world, t);
+      // v15: no hay minimapa en pantalla — el mapa solo existe al pulsar M
+      if (small) render(small, world, t);
       if (bigVisible) render(big, world, t);
     },
     toggleBig,

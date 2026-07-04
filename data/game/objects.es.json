@@ -22,7 +22,8 @@
  "linterna": {
   "id": "linterna",
   "nombre": "Linterna",
-  "descripcion": "Amplía tu radio de visión mientras está encendida. Su luz atrae a las Deathmoths.",
+  "descripcion": "Amplía tu radio de visión mientras está encendida. Debes llevarla EN LA MANO. Su luz atrae a las Deathmoths.",
+  "manos": 1,
   "efecto": {
    "toggle": "luz"
   },
@@ -59,7 +60,8 @@
  "tuberia": {
   "id": "tuberia",
   "nombre": "Tubería oxidada",
-  "descripcion": "Un tramo de tubería arrancado de Level 2. Mientras la lleves, muévete HACIA una entidad adyacente para golpearla.",
+  "descripcion": "Un tramo de tubería arrancado de Level 2. Con ella EN LA MANO, muévete HACIA una entidad adyacente para golpearla.",
+  "manos": 1,
   "efecto": {
    "pasivo": "arma",
    "dano": 18

@@ -5,14 +5,23 @@
 (function () {
   if (!window.THREE) { window.Render3D = null; return; }
 
+  // ---- modo de cámara (v15): 'tercera' = a la espalda del personaje (por defecto);
+  // '?cam=alta' conserva la cámara Octopath inclinada de v9-v14 para comparar ----
+  const CAM_MODO = new URLSearchParams(location.search).get('cam') === 'alta' ? 'alta' : 'tercera';
+
   // ---- constantes de cámara y escena (afinables) ----
   const CAM = { fov: 44, dy: 5.8, dz: 4.2, lookY: 0.4, lookAhead: 1.1, suavidad: 0.06, bob: 0.007 };
-  let camRot = 0;          // rotación de cámara en pasos de 90° (0-3), tecla Q
+  // 3ª persona: cámara baja tras el hombro, mira 2.2 tiles por delante
+  const TP = { fov: 56, alto: 1.5, dist: 2.6, lookY: 0.95, lookAhead: 2.2, suavidad: 0.1, bob: 0.012 };
+  let camRot = 0;          // rotación de cámara en pasos de 90° (0-3), tecla Q (modo alta)
   let camYaw = 0;          // yaw animado (radianes)
-  const WALL_H = 1.2;      // altura de los muros en unidades-tile (referencia Octopath)
+  // altura de muros: en 3ª persona son de altura real (la cámara va a 1.5 y JAMÁS
+  // ve por encima → nunca se rompe la sensación de interior)
+  const WALL_H = CAM_MODO === 'tercera' ? 2.3 : 1.2;
   const SPRITE_H = 1.05;   // alto del billboard de actores
+  const ROT_VEC = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // norte, este, sur, oeste
 
-  let renderer, scene, camera, amb, plight, spot;
+  let renderer, scene, camera, amb, plight, spot, dlight;
   let composer = null;           // postprocesado (bloom + gamma); null => render directo
   let fogBase = 0.08;
   let glCanvas, overlay, octx, W, H;
@@ -49,7 +58,7 @@
     renderer.toneMappingExposure = 1.15;
 
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(CAM.fov, W / H, 0.1, 60);
+    camera = new THREE.PerspectiveCamera(CAM_MODO === 'tercera' ? TP.fov : CAM.fov, W / H, 0.1, 60);
 
     // Postprocesado: bloom (solo emisivos casi blancos superan el umbral) + corrección
     // gamma final — en r147 el composer NO aplica outputEncoding, sin ese pase la
@@ -71,6 +80,11 @@
     plight.shadow.mapSize.set(512, 512);
     plight.shadow.bias = -0.01;
     scene.add(amb, plight);
+    // luz cenital suave del motor: la sensación de que la luz baja del techo
+    // (estática — nada procedural; la intensidad se ajusta por nivel en buildLevel)
+    dlight = new THREE.DirectionalLight(0xfff2dc, 0.35);
+    dlight.position.set(0.25, 1, 0.15);
+    scene.add(dlight);
     // foco de la linterna (cono real; se enciende con F)
     spot = new THREE.SpotLight(0xfff0d0, 0, 11, 0.5, 0.45, 1.2);
     scene.add(spot, spot.target);
@@ -285,8 +299,10 @@
 
     // --- SUELO CONTINUO: una sola textura seamless repetida con UV de mundo ---
     // (adiós a los cuadrados divididos: el patrón fluye entre tiles)
-    const floorTex = tex((tiles.sueloHD && tiles.sueloHD[0]) || tiles.suelo[0], 'suelo-seam');
+    const floorTex = tex(tiles.sueloSeam || tiles.suelo[0], 'suelo-seam');
     floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+    // la textura macro cubre 2×2 tiles → los UV de mundo se dividen entre 2
+    const uvEsc = tiles.sueloSeam ? 0.5 : 1;
     const aguaTex = tex(tiles.agua, 'agua-tile');
     const floorPos = [], floorUv = [], floorIdx = [];
     const aguaPos = [], aguaUv = [], aguaIdx = [];
@@ -299,7 +315,7 @@
         // UV = coordenadas de mundo → continuidad perfecta
         quad(floorPos, floorUv, floorIdx,
           [[x, 0, y + 1], [x + 1, 0, y + 1], [x + 1, 0, y], [x, 0, y]],
-          [x, y, x + 1, y + 1]);
+          [x * uvEsc, y * uvEsc, (x + 1) * uvEsc, (y + 1) * uvEsc]);
         if (v === T.AGUA)
           quad(aguaPos, aguaUv, aguaIdx,
             [[x, 0.02, y + 1], [x + 1, 0.02, y + 1], [x + 1, 0.02, y], [x, 0.02, y]],
@@ -373,6 +389,61 @@
       const techos = mkMesh(topPos, topUv, topIdx, tiles.techo, 'muro-techo', false);
       levelGroup.add(lados, techos);
       solidosCamara = [lados, techos]; // para la colisión de la cámara
+
+      // --- TECHO REAL (solo 3ª persona e interiores): la cámara va por debajo,
+      // así que el nivel se siente un interior cerrado de verdad. Los paneles
+      // fluorescentes son ESTÁTICOS (parte del techo, florecen con el bloom). ---
+      if (CAM_MODO === 'tercera' && world.level.bioma !== 'invernadero') {
+        const plafonTex = pintado('plafon-' + world.level.id, () => lienzo(48, 48, (ctx2, w2, h2) => {
+          ctx2.fillStyle = SH(pal.pared, 0.42);
+          ctx2.fillRect(0, 0, w2, h2);
+          ctx2.strokeStyle = SH(pal.pared, 0.3);              // juntas de placas
+          ctx2.strokeRect(0.5, 0.5, w2 - 1, h2 - 1);
+          ctx2.fillStyle = SH(pal.pared, 0.36);               // manchas de humedad
+          ctx2.fillRect(6, 8, 10, 6); ctx2.fillRect(30, 26, 8, 9);
+        }));
+        plafonTex.wrapS = plafonTex.wrapT = THREE.RepeatWrapping;
+        const cPos = [], cUv = [], cIdx = [];
+        const pPos = [], pUv = [], pIdx = [];
+        // paneles cada 4×4 tiles en niveles iluminados, 6×6 en penumbra, ninguno a oscuras
+        const osc = world.level.oscuridad || 0;
+        const cada = osc < 0.45 ? 4 : osc < 0.75 ? 6 : 0;
+        for (let y = 0; y < g.h; y++)
+          for (let x = 0; x < g.w; x++) {
+            const v = g.t[y * g.w + x];
+            if (v === T.VACIO || v === T.PARED) continue;
+            // cara inferior del techo (se ve desde abajo)
+            quad(cPos, cUv, cIdx,
+              [[x, WALL_H, y], [x + 1, WALL_H, y], [x + 1, WALL_H, y + 1], [x, WALL_H, y + 1]],
+              [x, y, x + 1, y + 1]);
+            if (cada && x % cada === Math.floor(cada / 2) && y % cada === Math.floor(cada / 2)) {
+              const ejeX = !esWall(x - 1, y) && !esWall(x + 1, y);
+              const hw = ejeX ? 0.42 : 0.16, hd = ejeX ? 0.16 : 0.42;
+              const cx2 = x + 0.5, cz2 = y + 0.5, yP = WALL_H - 0.02;
+              quad(pPos, pUv, pIdx,
+                [[cx2 - hw, yP, cz2 - hd], [cx2 + hw, yP, cz2 - hd],
+                 [cx2 + hw, yP, cz2 + hd], [cx2 - hw, yP, cz2 + hd]],
+                [0, 0, 1, 1]);
+            }
+          }
+        if (cPos.length) {
+          const cgeo = new THREE.BufferGeometry();
+          cgeo.setAttribute('position', new THREE.Float32BufferAttribute(cPos, 3));
+          cgeo.setAttribute('uv', new THREE.Float32BufferAttribute(cUv, 2));
+          cgeo.setIndex(cIdx);
+          cgeo.computeVertexNormals();
+          levelGroup.add(new THREE.Mesh(cgeo, new THREE.MeshLambertMaterial({ map: plafonTex })));
+        }
+        if (pPos.length) {
+          const pgeo = new THREE.BufferGeometry();
+          pgeo.setAttribute('position', new THREE.Float32BufferAttribute(pPos, 3));
+          pgeo.setAttribute('uv', new THREE.Float32BufferAttribute(pUv, 2));
+          pgeo.setIndex(pIdx);
+          levelGroup.add(new THREE.Mesh(pgeo, new THREE.MeshBasicMaterial({
+            color: 0xfff6dc, toneMapped: false, fog: false,
+          })));
+        }
+      }
     } else {
       // bosque/exterior: árboles y rocas como billboards verticales
       const canvas = tiles.wallStyle === 'arbol' ? tiles.arbol : tiles.roca;
@@ -625,9 +696,16 @@
       if (frame._look) { frame._look.x -= world._shift3d.x; frame._look.z -= world._shift3d.z; }
       world._shift3d = null;
     } else if (!esMismoNivel || !frame._look) {
-      // nivel nuevo: centrado inmediato
-      camera.position.set(p.rx + 0.5, CAM.dy, p.ry + 0.5 + CAM.dz);
-      frame._look = new THREE.Vector3(p.rx + 0.5, CAM.lookY, p.ry + 0.5);
+      // nivel nuevo: centrado inmediato (según el modo de cámara)
+      if (CAM_MODO === 'tercera') {
+        const [fx0, fz0] = ROT_VEC[p.rot ?? 2];
+        camYaw = Math.atan2(-fx0, -fz0);
+        camera.position.set(p.rx + 0.5 - fx0 * TP.dist, TP.alto, p.ry + 0.5 - fz0 * TP.dist);
+        frame._look = new THREE.Vector3(p.rx + 0.5 + fx0 * TP.lookAhead, TP.lookY, p.ry + 0.5 + fz0 * TP.lookAhead);
+      } else {
+        camera.position.set(p.rx + 0.5, CAM.dy, p.ry + 0.5 + CAM.dz);
+        frame._look = new THREE.Vector3(p.rx + 0.5, CAM.lookY, p.ry + 0.5);
+      }
     }
     // (remodelaciones del mismo nivel: la cámara no se toca)
   }
@@ -688,19 +766,26 @@
     const p = world.player;
     const px = p.rx + 0.5, pz = p.ry + 0.5;
 
-    // jugador: orientación del sprite RELATIVA a la cámara rotada
-    const dir = p.dir || 'down';
-    let wx = 0, wy = 0;
-    if (dir === 'down') wy = 1;
-    else if (dir === 'up') wy = -1;
-    else { wx = p.flip ? -1 : 1; }
-    const th = camRot * Math.PI / 2;
-    const svx = Math.round(Math.cos(th) * wx - Math.sin(th) * wy);
-    const svy = Math.round(Math.sin(th) * wx + Math.cos(th) * wy);
+    // jugador: orientación del sprite RELATIVA a la cámara
     let sid, sflip = false;
-    if (svy > 0) sid = 'player_down';
-    else if (svy < 0) sid = 'player_up';
-    else { sid = 'player_side'; sflip = svx < 0; }
+    if (CAM_MODO === 'tercera') {
+      // la cámara va siempre a su espalda: le vemos la espalda
+      sid = 'player_up';
+    } else {
+      const dir = p.dir || 'down';
+      let wx = 0, wy = 0;
+      if (dir === 'down') wy = 1;
+      else if (dir === 'up') wy = -1;
+      else { wx = p.flip ? -1 : 1; }
+      const th = camRot * Math.PI / 2;
+      const svx = Math.round(Math.cos(th) * wx - Math.sin(th) * wy);
+      const svy = Math.round(Math.sin(th) * wx + Math.cos(th) * wy);
+      if (svy > 0) sid = 'player_down';
+      else if (svy < 0) sid = 'player_up';
+      else { sid = 'player_side'; sflip = svx < 0; }
+    }
+    // malherido: el propio sprite lo cuenta (sangre y palidez)
+    if (p.salud < 35 && Sprites.tiene(sid + '_herido')) sid += '_herido';
     const pframe = world.moving ? Math.floor(t / 150) % Sprites.frameCount(sid) : 0;
     playerSprite.material.map = spriteTexFlip(sid, pframe, sflip);
     playerSprite.material.needsUpdate = true;
@@ -782,49 +867,92 @@
     // luminarias cercanas + polvo en suspensión
     if (window.Atmos3D) Atmos3D.frame(world, t, px, pz, luzOn);
 
-    // cámara Octopath: baja, cercana, con inercia, bob sutil y rotación 90° (Q)
-    if (world.moving) camBobT += 0.11;
-    const bob = Math.sin(camBobT) * CAM.bob * (world.moving ? 1 : 0.15);
-    const yawObjetivo = camRot * Math.PI / 2;
-    // camino angular más corto
-    let dyaw = yawObjetivo - camYaw;
-    while (dyaw > Math.PI) dyaw -= Math.PI * 2;
-    while (dyaw < -Math.PI) dyaw += Math.PI * 2;
-    camYaw += dyaw * 0.1;
-    const ox = Math.sin(camYaw) * CAM.dz;
-    const oz = Math.cos(camYaw) * CAM.dz;
-    let target = new THREE.Vector3(px + ox, CAM.dy + bob, pz + oz);
-    // colisión de cámara: si un muro se interpone entre el jugador y la cámara,
-    // la cámara se acerca hasta quedar delante (nunca tapa al jugador)
-    if (solidosCamara.length) {
-      // el rayo protege la visión de los PIES del jugador (lo primero que tapan los muros)
-      const desde = new THREE.Vector3(px, 0.22, pz);
-      const hacia = target.clone().sub(desde);
-      const dist = hacia.length();
-      rayo.set(desde, hacia.normalize());
-      rayo.far = dist;
-      const hits = rayo.intersectObjects(solidosCamara, false);
-      if (hits.length && hits[0].distance < dist - 0.3) {
-        if (hits[0].distance > 2.4) {
-          // hay hueco: acercar la cámara hasta quedar delante del muro
-          target = desde.clone().add(hacia.multiplyScalar(hits[0].distance - 0.35));
-          target.y = Math.max(target.y, 2.4);
-        } else {
-          // el muro está encima del jugador: cámara casi cenital sobre él
-          target = new THREE.Vector3(
-            px + Math.sin(camYaw) * 1.2, 6.2, pz + Math.cos(camYaw) * 1.2
-          );
+    if (CAM_MODO === 'tercera') {
+      // --- CÁMARA 3ª PERSONA: pegada a la espalda, baja, inmersiva ---
+      const rot = p.rot ?? 2;
+      const [fx3, fz3] = ROT_VEC[rot];
+      if (world.moving) camBobT += 0.13;
+      const bob = Math.sin(camBobT) * TP.bob * (world.moving ? 1 : 0.12);
+      // el yaw viaja por el camino angular más corto hasta quedar tras el jugador
+      const yawObjetivo = Math.atan2(-fx3, -fz3);
+      let dyaw = yawObjetivo - camYaw;
+      while (dyaw > Math.PI) dyaw -= Math.PI * 2;
+      while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+      camYaw += dyaw * 0.12;
+      const ox = Math.sin(camYaw) * TP.dist;
+      const oz = Math.cos(camYaw) * TP.dist;
+      let target = new THREE.Vector3(px + ox, TP.alto + bob, pz + oz);
+      // colisión: si un muro queda entre la cabeza del jugador y la cámara, acercarla
+      if (solidosCamara.length) {
+        const desde = new THREE.Vector3(px, 1.05, pz);
+        const hacia = target.clone().sub(desde);
+        const dist = hacia.length();
+        rayo.set(desde, hacia.clone().normalize());
+        rayo.far = dist;
+        const hits = rayo.intersectObjects(solidosCamara, false);
+        if (hits.length && hits[0].distance < dist - 0.2) {
+          const d2 = Math.max(0.65, hits[0].distance - 0.25);
+          target = desde.clone().add(hacia.normalize().multiplyScalar(d2));
+          target.y = Math.min(target.y, TP.alto + bob);
         }
       }
+      camera.position.lerp(target, TP.suavidad);
+      // mira hacia delante (según la órbita actual: giro suave sin bandazos)
+      frame._look = frame._look || new THREE.Vector3(px, TP.lookY, pz);
+      frame._look.lerp(
+        new THREE.Vector3(px - Math.sin(camYaw) * TP.lookAhead, TP.lookY, pz - Math.cos(camYaw) * TP.lookAhead),
+        0.12
+      );
+      camera.lookAt(frame._look);
+      // si la cámara queda pegada (muro a la espalda), el personaje se desvanece
+      // en vez de tapar media pantalla
+      const dCam = camera.position.distanceTo(new THREE.Vector3(px, 1.0, pz));
+      playerSprite.material.opacity = Math.max(0, Math.min(1, (dCam - 0.85) / 0.9));
+    } else {
+      // --- cámara Octopath clásica (?cam=alta): inercia, bob sutil, rotación Q/E ---
+      if (world.moving) camBobT += 0.11;
+      const bob = Math.sin(camBobT) * CAM.bob * (world.moving ? 1 : 0.15);
+      const yawObjetivo = camRot * Math.PI / 2;
+      // camino angular más corto
+      let dyaw = yawObjetivo - camYaw;
+      while (dyaw > Math.PI) dyaw -= Math.PI * 2;
+      while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+      camYaw += dyaw * 0.1;
+      const ox = Math.sin(camYaw) * CAM.dz;
+      const oz = Math.cos(camYaw) * CAM.dz;
+      let target = new THREE.Vector3(px + ox, CAM.dy + bob, pz + oz);
+      // colisión de cámara: si un muro se interpone entre el jugador y la cámara,
+      // la cámara se acerca hasta quedar delante (nunca tapa al jugador)
+      if (solidosCamara.length) {
+        // el rayo protege la visión de los PIES del jugador (lo primero que tapan los muros)
+        const desde = new THREE.Vector3(px, 0.22, pz);
+        const hacia = target.clone().sub(desde);
+        const dist = hacia.length();
+        rayo.set(desde, hacia.normalize());
+        rayo.far = dist;
+        const hits = rayo.intersectObjects(solidosCamara, false);
+        if (hits.length && hits[0].distance < dist - 0.3) {
+          if (hits[0].distance > 2.4) {
+            // hay hueco: acercar la cámara hasta quedar delante del muro
+            target = desde.clone().add(hacia.multiplyScalar(hits[0].distance - 0.35));
+            target.y = Math.max(target.y, 2.4);
+          } else {
+            // el muro está encima del jugador: cámara casi cenital sobre él
+            target = new THREE.Vector3(
+              px + Math.sin(camYaw) * 1.2, 6.2, pz + Math.cos(camYaw) * 1.2
+            );
+          }
+        }
+      }
+      camera.position.lerp(target, CAM.suavidad);
+      // el punto de mira también con inercia: sin micro-tirones por paso
+      frame._look = frame._look || new THREE.Vector3(px, CAM.lookY, pz);
+      frame._look.lerp(
+        new THREE.Vector3(px - Math.sin(camYaw) * CAM.lookAhead, CAM.lookY, pz - Math.cos(camYaw) * CAM.lookAhead),
+        0.09
+      );
+      camera.lookAt(frame._look);
     }
-    camera.position.lerp(target, CAM.suavidad);
-    // el punto de mira también con inercia: sin micro-tirones por paso
-    frame._look = frame._look || new THREE.Vector3(px, CAM.lookY, pz);
-    frame._look.lerp(
-      new THREE.Vector3(px - Math.sin(camYaw) * CAM.lookAhead, CAM.lookY, pz - Math.cos(camYaw) * CAM.lookAhead),
-      0.09
-    );
-    camera.lookAt(frame._look);
 
     if (composer && !window.NOFX) {
       try { composer.render(); }
@@ -867,6 +995,17 @@
       octx.fillStyle = `rgba(60,0,20,${0.14 * sc})`;
       octx.fillRect(0, 0, W, H);
     }
+    // clima del nivel: tinte helado o de horno (regla frio/calor de la ficha)
+    const reglas = world.level.reglas || [];
+    if (reglas.includes('frio')) {
+      const resp = 0.06 + 0.025 * Math.sin(t * 0.0012); // respira despacio
+      octx.fillStyle = `rgba(140,190,235,${resp})`;
+      octx.fillRect(0, 0, W, H);
+    } else if (reglas.includes('calor')) {
+      const resp = 0.055 + 0.03 * Math.sin(t * 0.002);
+      octx.fillStyle = `rgba(235,110,30,${resp})`;
+      octx.fillRect(0, 0, W, H);
+    }
     if (!window.NOFX) {
       // viñeta + grano
       const vin = octx.createRadialGradient(W / 2, H / 2, H * 0.38, W / 2, H / 2, H * 0.8);
@@ -882,6 +1021,7 @@
 
   window.Render3D = {
     init, frame, project, TILE: 48,
+    modo: CAM_MODO,
     rotar(dir = 1) { camRot = (camRot + dir + 4) % 4; },
     get rot() { return camRot; },
   };

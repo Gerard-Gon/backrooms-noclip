@@ -159,7 +159,8 @@
   function drawPlayer(px, py, t, world) {
     const p = world.player;
     const dir = p.dir || 'down';
-    const spriteId = dir === 'side' ? 'player_side' : 'player_' + dir;
+    let spriteId = dir === 'side' ? 'player_side' : 'player_' + dir;
+    if (p.salud < 35 && Sprites.tiene && Sprites.tiene(spriteId + '_herido')) spriteId += '_herido';
     const frame = world.moving ? Math.floor(t / 150) % Sprites.frameCount(spriteId) : 0;
     const img = Sprites.get(spriteId, frame);
     ctx.save();
@@ -672,6 +673,16 @@
     if (world.player.cordura < 30) {
       const sc = (30 - world.player.cordura) / 30;
       ctx.fillStyle = `rgba(60,0,20,${0.12 * sc})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // clima del nivel: tinte helado o de horno
+    const reglasClima = world.level.reglas || [];
+    if (reglasClima.includes('frio')) {
+      ctx.fillStyle = `rgba(140,190,235,${0.06 + 0.025 * Math.sin(t * 0.0012)})`;
+      ctx.fillRect(0, 0, W, H);
+    } else if (reglasClima.includes('calor')) {
+      ctx.fillStyle = `rgba(235,110,30,${0.055 + 0.03 * Math.sin(t * 0.002)})`;
       ctx.fillRect(0, 0, W, H);
     }
 

@@ -61,16 +61,32 @@ headless: `--use-angle=swiftshader` (lento). Cargar three.min.js y render3d.js t
 materiales `toneMapped:false`) + GammaCorrection como ÚLTIMO pase (obligatorio en r147, si no la
 imagen sale lavada) + ACES tone mapping; los addons UMD vienen de
 `three@0.147.0/examples/js/` (r147 es la última versión con examples/js clásico).
-`engine/atmos3d.js`: luminarias deterministas por bioma (tubo/colgante/farola, emisor+haz+charco
-fusionados) con **pool fijo de 6 PointLights** sin sombra (nunca add/remove: evita recompilar
-shaders) + polvo THREE.Points. TODO lo de postpro/atmos es no-op con `?nofx=1` (SwiftShader
-headless no aguanta el bloom en dump-dom largos; capturas cortas sí). `ui/icons.js`: iconos
-pixel-art de la UI (matrices 12×12) + mapa emoji→icono (`Icons.deEmoji`) + marco 9-slice en la
-variable CSS `--marco`; los emojis en rules.js/textos se traducen en la UI, no en los datos.
-Fuentes OFL vendorizadas en `game/assets/fonts/`. El selftest expone `luminarias` en su JSON
-(-1 = NOFX). `Tiles.TILE=48` está ACOPLADO al render 2D (escala mundo→pantalla): no subirlo;
-el suelo HD del 3D va en `tiles.sueloHD` (96px, rng derivado propio). Sprites: rejilla 16 ó 24
-según `rows.length` (salida siempre 48px); animar con `% Sprites.frameCount(id)`, nunca `% 2`.
+TODO lo de postpro/atmos es no-op con `?nofx=1`. `ui/icons.js`: iconos pixel-art de la UI
+(matrices 12×12) + mapa emoji→icono (`Icons.deEmoji`) + marco 9-slice en la variable CSS
+`--marco`; los emojis en rules.js/textos se traducen en la UI, no en los datos.
+Fuentes OFL vendorizadas en `game/assets/fonts/`.
+`Tiles.TILE=48` está ACOPLADO al render 2D (escala mundo→pantalla): no subirlo.
+Sprites: rejilla 16 ó 24 según `rows.length` (salida siempre 48px); animar con
+`% Sprites.frameCount(id)`, nunca `% 2`.
+
+**v15 — TERCERA PERSONA (por defecto)**: cámara a la espalda (`TP` en render3d; `?cam=alta`
+recupera la Octopath); WALL_H 2.3 en tercera y TECHO REAL fusionado con paneles fluorescentes
+emisivos ESTÁTICOS sobre interiores (excepto bioma invernadero — cielo abierto). Controles:
+W/S avanza/retrocede según `player.rot` (0-3, `Game.girar/avanzar`), A/D-Q/E giran gratis.
+`atmos3d.js` = SOLO polvo (las luminarias procedurales se eliminaron a petición del usuario:
+la luz de techo la dan los paneles + DirectionalLight cenital). Suelo 3D = `tiles.sueloSeam`
+(macro 192px 2×2 tiles, TODO elemento orgánico con envoltura; UV de mundo ÷2). Sin tecla R:
+**mundo persistente** — `world.savedLevels` (snapshots en memoria; enterLevel restaura sin
+++entryCount) + salida `tipo:'retorno'` en el spawn (salvo `esSinRetorno`: void/caídas/texto
+con agujero|trampilla…); `world._ignoraExit` evita el modal al aparecer sobre una salida.
+HUD contextual: sin barras/turnos/minimapa — `Effects.bubble` (bocadillos con cola e
+histéresis en worldStep), sprite `player_*_herido` (salud<35, generado en sprites.js build),
+manos `player.manos[2]` (linterna/armas solo `world.enMano`; pasivos por `hasItem` que ya
+incluye manos) + mochila (B, drag&drop + EMPUÑAR). `ui.showChoice` = elecciones libres
+(beber agua: `level.aguaMala` o regla agua_traicionera → daño). Colección del códice:
+`Profiles.registrarDescubierto('salidas'|'entidades'|'objetos', clave)` con caché
+`_descCache` (no reescribir localStorage por turno); salidas clave `levelId::texto`.
+M/N = mapa (mute SOLO en menú ⚙). `Sfx.stopAmbient()` al ENTRAR en enterLevel.
 
 (Todos existen y están committeados. v3: render cenital con paredes finas autotile en `tiles.js`/`render.js`,
 pixel-art data-driven en `sprites.js` con override PNG desde `game/assets/sprites/`, efectos de combate

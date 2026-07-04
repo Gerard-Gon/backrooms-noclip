@@ -650,6 +650,158 @@
     torres: ['metal_futurista', 'panel'], invernadero: ['cristal', 'piedra'],
   };
 
+  // ---------- suelo CONTINUO para el 3D (v15) ----------
+  // Una sola textura macro de 192px (= 2×2 tiles a 96px de densidad) donde TODO
+  // elemento orgánico (motas, cercos, grietas, juntas) se dibuja con envoltura:
+  // el patrón enlaza consigo mismo por los 4 lados → cero cortes visibles, y al
+  // cubrir 2×2 tiles la repetición deja de cantar.
+  function floorSeam(pal, estilo, rng) {
+    const S = 192;                 // lienzo macro (2 tiles × 96px)
+    const C = 96;                  // celda (1 tile)
+    const c = canvas(S, S), ctx = c.getContext('2d');
+    const base = (f) => { ctx.fillStyle = shade(pal.suelo, f); ctx.fillRect(0, 0, S, S); };
+    // dibuja fn desplazada a los 9 offsets: lo que sale por un borde entra por el otro
+    const wrap = (fn) => {
+      for (const ox of [-S, 0, S]) for (const oy of [-S, 0, S]) fn(ox, oy);
+    };
+    const spk = (f, n, size = 1) => speckle(ctx, rng, shade(pal.suelo, f), n, 0, 0, S, S, size);
+    const spkDet = (f, n, size = 1) => speckle(ctx, rng, shade(pal.detalle, f), n, 0, 0, S, S, size);
+    // grieta vertical serpenteante que TERMINA en el mismo x en que empieza (wrap vertical)
+    const grieta = (f) => {
+      ctx.strokeStyle = shade(pal.suelo, f);
+      const x0 = rng.int(0, S - 1);
+      let x = x0, y = 0;
+      ctx.beginPath(); ctx.moveTo(x, y);
+      while (y < S - 14) { x += rng.int(-7, 7); y += rng.int(8, 16); ctx.lineTo(x, y); }
+      ctx.lineTo(x0, S);
+      ctx.stroke();
+    };
+
+    base(0.95);
+    switch (estilo) {
+      case 'moqueta_humeda':
+        spk(0.78, 2700); spk(1.14, 1750); spkDet(0.9, 500, 2);
+        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = shade(pal.detalle, 0.75);
+        for (let i = 0; i < 5; i++) {
+          const ex = rng.int(0, S), ey = rng.int(0, S), r1 = rng.int(20, 34), r2 = rng.int(14, 22);
+          wrap((ox, oy) => { ctx.beginPath(); ctx.ellipse(ex + ox, ey + oy, r1, r2, rng.f(), 0, 7); ctx.fill(); });
+        }
+        ctx.globalAlpha = 1;
+        break;
+      case 'moqueta':
+        spk(0.78, 2700); spk(1.14, 1750);
+        break;
+      case 'moqueta_cenefa':
+        spk(0.8, 2400); spk(1.12, 1450);
+        ctx.strokeStyle = shade(pal.detalle, 1.3);
+        ctx.setLineDash([12, 8]);
+        for (let gy = 0; gy < 2; gy++) for (let gx = 0; gx < 2; gx++)
+          ctx.strokeRect(gx * C + 11, gy * C + 11, C - 22, C - 22);
+        ctx.setLineDash([]);
+        break;
+      case 'hormigon':
+        spk(0.82, 1100);
+        grieta(0.66); grieta(0.7);
+        break;
+      case 'baldosa':
+      case 'baldosa_oscura':
+        if (estilo === 'baldosa_oscura') base(0.7);
+        spk(1.08, 520);
+        ctx.strokeStyle = shade(pal.suelo, estilo === 'baldosa_oscura' ? 1.5 : 0.74);
+        for (let i = 0; i <= S; i += C / 2) {
+          ctx.beginPath(); ctx.moveTo(i + 0.5, 0); ctx.lineTo(i + 0.5, S); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(0, i + 0.5); ctx.lineTo(S, i + 0.5); ctx.stroke();
+        }
+        break;
+      case 'tablones':
+      case 'tablones_claros': {
+        const b = estilo === 'tablones_claros' ? 1.15 : 1;
+        const alto = 24;
+        for (let i = 0; i < S / alto; i++) {
+          ctx.fillStyle = shade(pal.suelo, b * (0.85 + (i % 3) * 0.1));
+          ctx.fillRect(0, i * alto, S, alto);
+          ctx.strokeStyle = shade(pal.suelo, 0.6);
+          ctx.beginPath(); ctx.moveTo(0, i * alto + 0.5); ctx.lineTo(S, i * alto + 0.5); ctx.stroke();
+          const jx = rng.int(0, S - 1);      // junta vertical por tablón
+          ctx.beginPath(); ctx.moveTo(jx, i * alto); ctx.lineTo(jx, i * alto + alto); ctx.stroke();
+          ctx.strokeStyle = shade(pal.suelo, 0.75 * b);
+          const vx = rng.int(0, S), vlen = rng.int(30, 90);   // veta (envuelta)
+          wrap((ox) => { ctx.beginPath(); ctx.moveTo(vx + ox, i * alto + 12); ctx.lineTo(vx + vlen + ox, i * alto + 12); ctx.stroke(); });
+        }
+        break;
+      }
+      case 'piedra': {
+        spk(0.8, 950);
+        ctx.strokeStyle = shade(pal.suelo, 0.65);
+        // juntas de mampostería: cadenas que cruzan el lienzo y EMPALMAN al repetirse
+        for (let i = 0; i < 3; i++) {
+          const y0 = rng.int(0, S - 1);
+          let x = 0, y = y0;
+          ctx.beginPath(); ctx.moveTo(x, y);
+          while (x < S - 20) { x += rng.int(16, 34); y += rng.int(-10, 10); ctx.lineTo(x, y); }
+          ctx.lineTo(S, y0);
+          ctx.stroke();
+        }
+        grieta(0.65); grieta(0.65);
+        break;
+      }
+      case 'rejilla':
+        base(0.75);
+        ctx.strokeStyle = shade(pal.suelo, 1.3);
+        for (let i = 8; i < S; i += 16) {
+          ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, S); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(S, i); ctx.stroke();
+        }
+        break;
+      case 'negro':
+        base(0.85);
+        spkDet(1.2, 190);
+        break;
+      case 'nieve':
+        spk(1.1, 1450); speckle(ctx, rng, '#ffffff', 480, 0, 0, S, S);
+        ctx.fillStyle = shade(pal.suelo, 0.85);
+        for (let i = 0; i < 4; i++) {
+          const hx = rng.int(0, S), hy = rng.int(0, S);
+          wrap((ox, oy) => {
+            ctx.beginPath(); ctx.ellipse(hx + ox, hy + oy, 5, 9, 0.3, 0, 7); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(hx + 18 + ox, hy + 26 + oy, 5, 9, 0.3, 0, 7); ctx.fill();
+          });
+        }
+        break;
+      case 'blanco':
+        base(1.0);
+        spk(0.94, 320);
+        break;
+      case 'tierra':
+        spk(0.8, 1600); spkDet(1.0, 420, 2);
+        break;
+      case 'hierba':
+        spk(0.78, 1450); spkDet(1.15, 640, 2);
+        ctx.strokeStyle = shade(pal.detalle, 1.3);
+        for (let i = 0; i < 130; i++) {
+          const gx = rng.int(0, S), gy = rng.int(0, S);
+          wrap((ox, oy) => { ctx.beginPath(); ctx.moveTo(gx + ox, gy + oy); ctx.lineTo(gx + rng.int(-4, 4) + ox, gy - 8 + oy); ctx.stroke(); });
+        }
+        break;
+      case 'adoquin':
+        spk(0.85, 750);
+        ctx.strokeStyle = shade(pal.suelo, 0.7);
+        for (let y = 0; y < S; y += 24) { ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(S, y + 0.5); ctx.stroke(); }
+        for (let x = 0; x < S; x += 48) { ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, S); ctx.stroke(); }
+        break;
+      case 'panel':
+        ctx.strokeStyle = shade(pal.suelo, 0.84);
+        for (let gy = 0; gy < 2; gy++) for (let gx = 0; gx < 2; gx++)
+          ctx.strokeRect(gx * C + 5, gy * C + 5, C - 10, C - 10);
+        spk(1.06, 230);
+        break;
+      default:
+        spk(0.82, 1200); spk(1.1, 700);
+    }
+    return c;
+  }
+
   window.Tiles = {
     TILE, G, B0, B1, FH, RF,
     shade,
@@ -659,13 +811,13 @@
       const estiloPared = levelDef.estilo?.pared ?? fb[0];
       const estiloSuelo = levelDef.estilo?.suelo ?? fb[1];
       const wallStyle = estiloPared === 'arbol' ? 'arbol' : estiloPared === 'roca' ? 'roca' : 'tabique';
-      // suelo HD (96px) solo para el render 3D — rng derivado PROPIO para no
-      // desplazar la secuencia del rng que consumen las demás texturas
+      // suelo continuo (192px = 2×2 tiles) solo para el render 3D — rng derivado
+      // PROPIO para no desplazar la secuencia del rng de las demás texturas
       const rngHD = RNG.create(`tilesHD::${levelDef.id}::${estiloSuelo}`);
       const out = {
         wallStyle,
         suelo: [0, 1, 2].map((v) => floorTile(pal, estiloSuelo, rng, v)),
-        sueloHD: [0, 1, 2].map((v) => floorTile(pal, estiloSuelo, rngHD, v, TILE * 2)),
+        sueloSeam: floorSeam(pal, estiloSuelo, rngHD),
         agua: aguaTile(pal, rng),
         decor: decorTile(pal, levelDef.bioma, estiloSuelo, rng),
         caraFull: wallStyle === 'tabique' ? buildCaraFull(pal, estiloPared, rng) : null,

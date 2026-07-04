@@ -918,6 +918,7 @@
   "nombre": "Level 45: «Otherworldly Timberland»",
   "clase": "Clase variable · Bosque alienígena",
   "peligro": 3,
+  "aguaMala": true,
   "bioma": "bosque",
   "tam": [
    56,

@@ -100,23 +100,31 @@ html, body { height: 100%; background: #060504; color: var(--hueso);
 #vol-slider::-webkit-slider-thumb, #vol-slider-title::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none; width: 12px; height: 12px;
   background: var(--amarillo); border: 1px solid #0a0906; cursor: pointer; }
-#hud-bars { position: absolute; left: 12px; bottom: 12px; width: 210px; pointer-events: none; }
-.bar { display: flex; align-items: center; gap: 7px; margin-top: 5px; }
-.bar i { font-style: normal; width: 18px; text-align: center; font-size: 13px;
-  text-shadow: 1px 1px 2px #000; line-height: 0; }
-.track { flex: 1; height: 9px; background: rgba(10,9,6,.75); border: 1px solid rgba(58,53,42,.8); }
-.fill { height: 100%; transition: width .25s; }
-.fill.salud { background: #b04030; } .fill.cordura { background: #7a68b0; }
-.fill.sed { background: #4a80a8; } .fill.hambre { background: #a8863a; }
-#hud-inv { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 6px; }
-.inv-slot { width: 44px; height: 44px; background: rgba(10,9,6,.7);
+/* v15: HUD limpio — solo manos + mochila (todo lo demás es contextual) */
+#hud-manos { position: absolute; right: 14px; bottom: 14px; display: flex;
+  gap: 8px; align-items: center; }
+.mano-slot { width: 48px; height: 48px; background: rgba(10,9,6,.72);
+  border: 1px solid var(--borde); border-bottom-width: 3px; display: flex;
+  align-items: center; justify-content: center; cursor: pointer;
+  color: #55503f; font-size: 18px; }
+.mano-slot:hover { border-color: var(--amarillo-osc); }
+.mano-slot.activa { border-color: var(--amarillo); box-shadow: 0 0 10px rgba(217,198,110,.35); }
+#btn-mochila { width: 52px; height: 52px; background: rgba(16,14,9,.8);
+  border: 1px solid var(--amarillo-osc); cursor: pointer; display: flex;
+  align-items: center; justify-content: center; margin-left: 6px; }
+#btn-mochila:hover { box-shadow: 0 0 12px rgba(217,198,110,.3); }
+#backpack-panel { position: absolute; inset: 0; background: rgba(0,0,0,.6);
+  display: flex; align-items: center; justify-content: center; z-index: 15; }
+#backpack-slots { display: flex; gap: 8px; margin: 14px 0; }
+.inv-slot { width: 48px; height: 48px; background: rgba(10,9,6,.7);
   border: 1px solid var(--borde); display: flex; flex-direction: column;
   align-items: center; justify-content: center; font-size: 10px; cursor: pointer;
   color: var(--hueso); position: relative; }
 .inv-slot:hover { border-color: var(--amarillo-osc); }
-.inv-slot .k { position: absolute; top: 1px; left: 3px; color: #6a6455; font-size: 9px; }
-.inv-slot .n { font-size: 16px; }
-.inv-slot.active { border-color: var(--amarillo); box-shadow: 0 0 8px rgba(217,198,110,.3); }
+.inv-slot .k { position: absolute; top: 1px; left: 3px; color: #6a6455; font-size: 12px; }
+#ctrl-list { margin-top: 14px; color: var(--gris); font-size: 15px; line-height: 1.7;
+  border-top: 1px solid var(--borde); padding-top: 10px; }
+#ctrl-list b { color: var(--hueso); letter-spacing: 1px; }
 #item-modal { position: absolute; inset: 0; background: rgba(0,0,0,.6);
   display: flex; align-items: center; justify-content: center; z-index: 17; }
 #item-icon { font-size: 22px; }
@@ -144,10 +152,6 @@ html, body { height: 100%; background: #060504; color: var(--hueso);
   image-rendering: pixelated; max-width: 84vmin; max-height: 84vmin; }
 #minimap-big p { color: var(--gris); font-size: 12px; margin-top: 10px; }
 
-#hud-keys { position: absolute; top: 38px; left: 50%; transform: translateX(-50%);
-  font-size: 13px; color: #7a7462; background: rgba(8,7,4,.5);
-  padding: 2px 12px; border: 1px solid rgba(58,53,42,.5); pointer-events: none;
-  white-space: nowrap; }
 #game-log { position: absolute; left: 236px; bottom: 12px; right: 240px; max-height: 96px;
   overflow: hidden; font-size: 15px; line-height: 1.4; color: #cfc8b0;
   text-shadow: 1px 1px 2px #000; pointer-events: none; display: flex;
@@ -170,7 +174,7 @@ html, body { height: 100%; background: #060504; color: var(--hueso);
 #dice-text { color: var(--hueso); font-size: 17px; text-shadow: 1px 1px 2px #000; }
 
 /* ---------- modal salida ---------- */
-#exit-modal { position: absolute; inset: 0; background: rgba(0,0,0,.6);
+#exit-modal, #choice-modal { position: absolute; inset: 0; background: rgba(0,0,0,.6);
   display: flex; align-items: center; justify-content: center; z-index: 14; }
 .modal-box { border: 8px solid transparent; border-image: var(--marco) 8 fill stretch;
   max-width: 480px; width: 90%; padding: 24px 28px; }
@@ -216,6 +220,18 @@ html, body { height: 100%; background: #060504; color: var(--hueso);
 .codex-level .stats { color: var(--amarillo); font-size: 15px; margin-top: 7px; }
 .codex-level a { color: #7a90a8; font-size: 14px; }
 #codex-history { padding-left: 22px; font-size: 15px; line-height: 1.7; color: #cfc8b0; }
+
+/* colección de coleccionables (v15) */
+.col-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.col-cuenta { width: 100%; color: var(--amarillo); font-size: 14px; margin-bottom: 2px; }
+.col-card { width: 96px; padding: 8px 4px 6px; background: #0f0e0a; text-align: center;
+  border: 1px solid var(--borde); font-size: 13px; line-height: 1.25; color: #cfc8b0; }
+.col-card img { image-rendering: pixelated; display: block; margin: 0 auto 4px; }
+.col-card.col-locked { color: #5a5546; }
+.col-nivel { border: 1px solid var(--borde); background: #0f0e0a; padding: 10px 14px;
+  margin-bottom: 8px; font-size: 15px; }
+.col-nivel ul { padding-left: 20px; color: #cfc8b0; line-height: 1.55; }
+.col-nivel .col-locked, li.col-locked { color: #5a5546; font-style: italic; }
 
 /* ---------- fin ---------- */
 .end-box { max-width: 620px; width: 92%;

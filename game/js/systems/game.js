@@ -58,6 +58,7 @@
       }
       d.activo = nombre;
       this._save(d);
+      this._descCache = null;
       return true;
     },
     select(nombre) {
@@ -65,6 +66,7 @@
       if (!d.perfiles[nombre]) return false;
       d.activo = nombre;
       this._save(d);
+      this._descCache = null;
       return true;
     },
     remove(nombre) {
@@ -84,6 +86,26 @@
       this._update((p) => {
         p.codice[levelId] = p.codice[levelId] || { veces: 0, mejorTurnos: null, escapado: false };
         p.codice[levelId].veces++;
+      });
+    },
+    // coleccionables (v15): salidas/entidades/objetos descubiertos — con caché en
+    // memoria para no reescribir localStorage cada turno
+    _descCache: null,
+    descubierto(tipo, clave) {
+      if (!this._descCache) {
+        const p = this.get();
+        this._descCache = p && p.descubiertos
+          ? { salidas: { ...p.descubiertos.salidas }, entidades: { ...p.descubiertos.entidades }, objetos: { ...p.descubiertos.objetos } }
+          : { salidas: {}, entidades: {}, objetos: {} };
+      }
+      return !!this._descCache[tipo][clave];
+    },
+    registrarDescubierto(tipo, clave) {
+      if (this.descubierto(tipo, clave)) return;
+      this._descCache[tipo][clave] = true;
+      this._update((p) => {
+        p.descubiertos = p.descubiertos || { salidas: {}, entidades: {}, objetos: {} };
+        p.descubiertos[tipo][clave] = true;
       });
     },
     registrarSalida(levelId, turnos) {
@@ -124,6 +146,7 @@
         d.perfiles[o.nombre] = o.datos;
         d.activo = o.nombre;
         this._save(d);
+        this._descCache = null;
         return true;
       } catch (e) { return false; }
     },
@@ -162,7 +185,11 @@
   };
   world.thirst = (n) => { world.player.sed = Math.max(0, Math.min(100, world.player.sed + n)); };
   world.hunger = (n) => { world.player.hambre = Math.max(0, Math.min(100, world.player.hambre + n)); };
-  world.hasItem = (id) => world.player.inv.includes(id);
+  // posesión total (mochila + manos) — los pasivos funcionan por llevarlo encima
+  world.hasItem = (id) => world.player.inv.includes(id) ||
+    (world.player.manos || []).includes(id);
+  // "en mano": linterna y armas solo funcionan empuñadas
+  world.enMano = (id) => (world.player.manos || []).includes(id);
 
   // Remodelación REAL de una zona del nivel (propiedad no euclidiana):
   // regenera los tiles de un chunk lejos del jugador, valida que todas las
@@ -246,25 +273,38 @@
   function startRun(seed) {
     world.runSeed = seed || RNG.randomSeed();
     world.player = {
-      x: 0, y: 0, rx: 0, ry: 0, dir: 'down', flip: false,
+      x: 0, y: 0, rx: 0, ry: 0, dir: 'down', flip: false, rot: 2,
       salud: 100, cordura: 100, sed: 100, hambre: 100,
-      inv: [], luz: false, viva: true,
+      inv: [], manos: [null, null], luz: false, viva: true,
     };
     world.journal = [];
     world.visited = [];
     world.prevStack = [];
     world.entryCount = {};
+    world.savedLevels = {};   // niveles visitados, conservados TAL CUAL (v15)
     world.turnTotal = 0;
     world.over = false;
     enterLevel('level-0', 'Despertaste aquí tras atravesar la realidad.');
   }
 
   // ---------- transición de nivel ----------
-  function enterLevel(id, via) {
+  // salidas de las que físicamente NO se puede volver (caídas, vacío, desplomes)
+  function esSinRetorno(def) {
+    if (def.sinRetorno) return true;
+    if (def.tipo === 'void') return true;
+    return /agujero|caes |caer |caída|desplom|abismo|pozo|trampilla/i.test(def.texto || '');
+  }
+
+  function enterLevel(id, via, entrada) {
     const def = world.data.levels[id];
     if (!def) { world.log('Ese camino no lleva a ninguna parte.', 'event'); return; }
 
-    // cierra el diario del nivel anterior
+    // el ambiente del nivel anterior muere AQUÍ (nada de sonidos acumulados)
+    if (window.Sfx) Sfx.stopAmbient();
+
+    // cierra el diario + SNAPSHOT del nivel que abandonas: el mundo es
+    // persistente (v15) — si vuelves por donde viniste, está tal cual lo dejaste
+    const desdeId = world.level ? world.level.id : null;
     if (world.level) {
       world.journal.push({
         nivel: world.level.id,
@@ -273,11 +313,15 @@
         salida: via,
       });
       Profiles.registrarSalida(world.level.id, world.turn);
+      world.savedLevels[world.level.id] = {
+        map: world.map, tiles: world.tiles, entities: world.entities,
+        explored: world.explored, light: world.light,
+        ventanaN: world.ventanaN || 0, mapaVersion: world.mapaVersion || 0,
+        entryN: world.entryCount[world.level.id] || 1,
+      };
     }
+    world._preVentana = null;
 
-    world.entryCount[id] = (world.entryCount[id] || 0) + 1;
-    const levelSeed = `${world.runSeed}::${id}::${world.entryCount[id]}`;
-    world.rng = RNG.create(levelSeed);
     world.level = def;
     world.turn = 0;
     world.visionMod = 0;
@@ -285,17 +329,62 @@
     if (!world.visited.includes(id)) world.visited.push(id);
     Profiles.registrarEntrada(id);
 
-    world.map = MapGen.generate(def, world.rng);
-    world.tiles = Tiles.build(def, world.rng);
-    world.entities = Entities.create(world.map.entitySpawns, world.data.entities, world.rng);
+    const snap = world.savedLevels[id];
+    if (snap) {
+      // ------- nivel ya visitado: se RESTAURA tal cual (no se regenera) -------
+      world.rng = RNG.create(`${world.runSeed}::${id}::${snap.entryN}::t${world.turnTotal}`);
+      world.map = snap.map;
+      world.tiles = snap.tiles;
+      world.entities = snap.entities;
+      world.explored = snap.explored;
+      world.light = snap.light;
+      world.ventanaN = snap.ventanaN;
+      world.mapaVersion = snap.mapaVersion;
+      // apareces en la salida que conecta con el nivel del que vienes
+      let pos = null;
+      if (desdeId) {
+        const exVuelta = world.map.exits.find(
+          (e) => e.def.destino === desdeId || e.def._destinoResuelto === desdeId
+        );
+        if (exVuelta) pos = [exVuelta.x, exVuelta.y];
+      }
+      if (!pos) pos = world.map.spawn;
+      world.player.x = pos[0];
+      world.player.y = pos[1];
+    } else {
+      // ------- primera visita: generación procedural -------
+      world.entryCount[id] = (world.entryCount[id] || 0) + 1;
+      const levelSeed = `${world.runSeed}::${id}::${world.entryCount[id]}`;
+      world.rng = RNG.create(levelSeed);
+      world.ventanaN = 0;
 
-    const g = world.map.grid;
-    world.explored = new Uint8Array(g.w * g.h);
-    world.light = new Float32Array(g.w * g.h);
-    world.player.x = world.map.spawn[0];
-    world.player.y = world.map.spawn[1];
+      world.map = MapGen.generate(def, world.rng);
+      world.tiles = Tiles.build(def, world.rng);
+      world.entities = Entities.create(world.map.entitySpawns, world.data.entities, world.rng);
+
+      const g = world.map.grid;
+      world.explored = new Uint8Array(g.w * g.h);
+      world.light = new Float32Array(g.w * g.h);
+      world.player.x = world.map.spawn[0];
+      world.player.y = world.map.spawn[1];
+
+      // salida de RETORNO donde apareces: la única manera de volver atrás es la
+      // puerta que ya usaste — salvo que hayas CAÍDO (físicamente imposible)
+      if (desdeId && (!entrada || !entrada.sinRetorno)) {
+        world.map.exits.push({
+          x: world.player.x, y: world.player.y,
+          def: {
+            texto: 'El camino por el que llegaste sigue abierto.',
+            destino: desdeId, tipo: 'retorno',
+          },
+        });
+      }
+    }
     world.player.rx = world.player.x;
     world.player.ry = world.player.y;
+    // no abras el modal por APARECER encima de la salida (solo al volver a pisarla)
+    const exAqui = world.map.exits.find((e) => e.x === world.player.x && e.y === world.player.y);
+    world._ignoraExit = exAqui ? { x: exAqui.x, y: exAqui.y } : null;
 
     Rules.aplicarEntrada(world);
     recomputeFov();
@@ -454,6 +543,7 @@
         } else {
           it.taken = true;
           world.player.inv.push(it.id);
+          Profiles.registrarDescubierto('objetos', it.id);
           world.log(`Recoges: ${world.data.objects[it.id].nombre}.`, 'good');
           if (window.Effects) {
             Effects.flash(it.x, it.y, world.data.objects[it.id].color);
@@ -464,9 +554,13 @@
       }
     }
 
-    // salida bajo los pies
+    // salida bajo los pies (la del punto de aparición no salta hasta que la
+    // abandones y vuelvas a pisarla; ESPACIO siempre funciona)
+    if (world._ignoraExit &&
+        (world.player.x !== world._ignoraExit.x || world.player.y !== world._ignoraExit.y))
+      world._ignoraExit = null;
     const ex = world.map.exits.find((e) => e.x === world.player.x && e.y === world.player.y);
-    if (ex) world.ui.showExitModal(ex.def);
+    if (ex && !world._ignoraExit) world.ui.showExitModal(ex.def);
 
     // aviso al pisar un contenedor sin registrar
     const contAqui = (world.map.props || []).find(
@@ -486,8 +580,28 @@
     if (world.turn % 15 === 0) world.hunger(-1);
     if (world.player.sed <= 0 && world.turn % 3 === 0) world.hurt(2, 'la deshidratación', true);
     if (world.player.hambre <= 0 && world.turn % 5 === 0) world.hurt(1, 'la inanición', true);
-    if (world.player.sed === 20) world.log('Tienes muchísima sed.', 'danger');
-    if (world.player.hambre === 20) world.log('El hambre te retuerce el estómago.', 'danger');
+
+    // HUD contextual (v15): sin barras — el personaje PIENSA sus estados en
+    // bocadillos, con histéresis para no repetirse cada turno
+    if (window.Effects) {
+      const B = world._boca || (world._boca = {});
+      const P = world.player;
+      const piensa = (clave, cond, reset, txt) => {
+        if (cond && !B[clave]) { B[clave] = true; Effects.bubble(P.x, P.y, txt); }
+        else if (reset) B[clave] = false;
+      };
+      piensa('salud', P.salud < 35, P.salud > 55, 'Estoy malherido… esto pinta mal.');
+      piensa('salud2', P.salud < 15, P.salud > 30, 'No aguantaré mucho más…');
+      piensa('cordura', P.cordura < 35, P.cordura > 55, 'Las paredes… me están susurrando.');
+      piensa('sed', P.sed < 30, P.sed > 55, 'Tengo la garganta seca. Necesito beber.');
+      piensa('sed2', P.sed <= 5, P.sed > 20, 'Agua… lo que sea… AGUA.');
+      piensa('hambre', P.hambre < 30, P.hambre > 55, 'Me ruge el estómago.');
+      if ((world.level.reglas || []).includes('frio') &&
+          world.turn % 38 === 12 && !world.hasItem('chaqueta'))
+        Effects.bubble(P.x, P.y, 'Me castañetean los dientes…');
+      if ((world.level.reglas || []).includes('calor') && world.turn % 44 === 20)
+        Effects.bubble(P.x, P.y, 'Este calor me está cociendo vivo.');
+    }
 
     // entidades
     recomputeDmap();
@@ -498,18 +612,50 @@
     }
 
     recomputeFov();
+
+    // colección del códice: entidades avistadas quedan registradas para siempre
+    for (const e of world.entities) {
+      if (!e.viva) continue;
+      const idxE = e.y * world.map.grid.w + e.x;
+      if (world.light[idxE] > 0.05 || (e.reveladaHasta ?? -1) > world.turn)
+        Profiles.registrarDescubierto('entidades', e.id);
+    }
+
     world.ui.updateHUD();
   }
 
   // ---------- acciones del jugador ----------
-  function tryMove(dx, dy) {
+  // vectores de encaramiento (rot 0-3): norte, este, sur, oeste (3ª persona)
+  const ROT_VEC = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+  const ROT_DIR = [
+    { dir: 'up', flip: false }, { dir: 'side', flip: false },
+    { dir: 'down', flip: false }, { dir: 'side', flip: true },
+  ];
+
+  // girar al personaje 90° (3ª persona): acción GRATIS, no consume turno
+  function girar(d) {
+    if (world.busy || world.over || !world.player) return;
+    world.player.rot = ((world.player.rot ?? 2) + d + 4) % 4;
+    const o = ROT_DIR[world.player.rot];
+    world.player.dir = o.dir;
+    world.player.flip = o.flip;
+  }
+  // avanzar (s=1) o retroceder (s=-1) según el encaramiento actual
+  function avanzar(s) {
+    const [fx, fy] = ROT_VEC[world.player.rot ?? 2];
+    tryMove(fx * s, fy * s, { keepDir: true });
+  }
+
+  function tryMove(dx, dy, opts) {
     if (world.busy || world.over) return;
     const reglas = world.level.reglas || [];
     if (reglas.includes('controles_invertidos')) { dx = -dx; dy = -dy; }
-    // orientación del sprite
-    if (dy > 0) world.player.dir = 'down';
-    else if (dy < 0) world.player.dir = 'up';
-    else if (dx !== 0) { world.player.dir = 'side'; world.player.flip = dx < 0; }
+    // orientación del sprite (en 3ª persona, retroceder no gira al personaje)
+    if (!opts || !opts.keepDir) {
+      if (dy > 0) world.player.dir = 'down';
+      else if (dy < 0) world.player.dir = 'up';
+      else if (dx !== 0) { world.player.dir = 'side'; world.player.flip = dx < 0; }
+    }
     const pasos = reglas.includes('gravedad_baja') ? 2 : 1;
 
     for (let i = 0; i < pasos; i++) {
@@ -540,12 +686,12 @@
           worldStep(); // el susto consume el turno
           return;
         }
-        if (world.hasItem('tuberia')) {
+        if (world.enMano('tuberia')) {
           golpear(ent);
           worldStep();
           return;
         }
-        world.log(`${ent.def.nombre} te corta el paso. (Sin un arma no puedes golpearla.)`, 'danger');
+        world.log(`${ent.def.nombre} te corta el paso. (Necesitas un arma EN LA MANO para golpearla.)`, 'danger');
         break;
       }
       world.player.x = nx;
@@ -605,7 +751,40 @@
       (p) => p.contenedor && !p.registrado && p.x === world.player.x && p.y === world.player.y
     );
     if (cont) { registrar(cont); return; }
+    // agua adyacente: TÚ decides si bebes (el lore decide las consecuencias)
+    const hayAgua = [[0, -1], [0, 1], [-1, 0], [1, 0]].some(
+      ([ax, ay]) => MapGen.at(world.map.grid, world.player.x + ax, world.player.y + ay) === T.AGUA
+    );
+    if (hayAgua) { beberAgua(); return; }
     world.log('No hay nada con lo que interactuar aquí.', 'event');
+  }
+
+  // interacción libre: beber de un charco/lago — la wiki manda si es buena idea
+  function beberAgua() {
+    const mala = world.level.aguaMala ||
+      (world.level.reglas || []).includes('agua_traicionera');
+    world.ui.showChoice(
+      'Agua estancada',
+      'El agua reposa quieta, con un brillo extraño en la superficie. La sed aprieta… ¿bebes?',
+      [
+        {
+          label: 'BEBER',
+          cb: () => {
+            if (mala) {
+              world.hurt(14, 'el agua contaminada', true);
+              world.sanity(-8);
+              world.log('Arde al tragar. El brillo del agua NO era un buen augurio.', 'danger');
+            } else {
+              world.thirst(30);
+              world.log('Bebes con las manos. Sabe a polvo y a metal, pero calma la sed.', 'good');
+            }
+            world.ui.updateHUD();
+            worldStep();
+          },
+        },
+        { label: 'Mejor no', cb: () => {} },
+      ]
+    );
   }
 
   const NOMBRES_CONT = {
@@ -623,6 +802,7 @@
           world.log(`Dado: ${d}. Hay algo útil… pero no te cabe nada más.`, 'event');
         } else {
           world.player.inv.push(id);
+          Profiles.registrarDescubierto('objetos', id);
           world.log(`Dado: ${d}. Encuentras: ${world.data.objects[id].nombre}.`, 'good');
           if (window.Effects) Effects.flash(world.player.x, world.player.y, '#ffe9a0');
         }
@@ -646,10 +826,55 @@
     });
   }
 
+  // ---------- manos (v15): dos ranuras; linterna/armas solo funcionan empuñadas ----------
+  function equipar(slot) {
+    const id = world.player.inv[slot];
+    if (!id) return;
+    const def = world.data.objects[id];
+    if (!def.manos) { world.log(`${def.nombre} no se empuña: viaja en la mochila.`, 'event'); return; }
+    const manos = world.player.manos;
+    if (def.manos === 2) {
+      if (manos[0] || manos[1]) { world.log('Ese objeto necesita las DOS manos libres.', 'event'); return; }
+      manos[0] = id; manos[1] = '=';
+    } else {
+      const libre = manos[0] === null ? 0 : manos[1] === null ? 1 : -1;
+      if (libre === -1) { world.log('Tienes las manos ocupadas.', 'event'); return; }
+      manos[libre] = id;
+    }
+    world.player.inv.splice(slot, 1);
+    world.log(`Empuñas: ${def.nombre}.`, 'good');
+    if (window.Sfx) Sfx.play('ui');
+    world.ui.updateHUD();
+  }
+
+  function desequipar(mano) {
+    const manos = world.player.manos;
+    let id = manos[mano];
+    if (id === '=') { mano = 0; id = manos[0]; }
+    if (!id) return;
+    if (world.player.inv.length >= 6) { world.log('La mochila está llena: no puedes guardar nada más.', 'event'); return; }
+    if (manos[1] === '=') { manos[0] = null; manos[1] = null; }
+    else manos[mano] = null;
+    world.player.inv.push(id);
+    // guardar la linterna la apaga (obvio, pero hay que decírselo al FOV)
+    if (id === 'linterna' && world.player.luz) {
+      world.player.luz = false;
+      world.log('Guardas la linterna apagada.', 'event');
+      recomputeFov();
+    }
+    if (window.Sfx) Sfx.play('ui');
+    world.ui.updateHUD();
+  }
+
   function toggleLuz() {
     if (world.busy || world.over) return;
     if (world.luzBloqueada) { world.log('Ninguna luz funciona en este nivel.', 'danger'); return; }
-    if (!world.hasItem('linterna')) { world.log('No tienes linterna.', 'event'); return; }
+    if (!world.enMano('linterna')) {
+      world.log(world.hasItem('linterna')
+        ? 'La linterna está en la mochila. Equípatela en una mano (icono 🎒).'
+        : 'No tienes linterna.', 'event');
+      return;
+    }
     world.player.luz = !world.player.luz;
     world.log(world.player.luz ? 'Enciendes la linterna. Su luz puede atraer cosas.' : 'Apagas la linterna.', 'event');
     recomputeFov();
@@ -721,18 +946,6 @@
     }
   }
 
-  function volver() {
-    if (world.busy || world.over) return;
-    if (!world.prevStack.length) {
-      world.log('No recuerdas por dónde llegaste. No hay vuelta atrás.', 'event');
-      return;
-    }
-    const prev = world.prevStack.pop();
-    world.sanity(-6);
-    world.log('Vuelves sobre tus pasos, con la sensación de haber perdido algo.', 'event');
-    enterLevel(prev, 'Volviste sobre tus pasos.');
-  }
-
   // ---------- cruzar salidas ----------
   function crossExit(def) {
     const tipo = def.tipo;
@@ -768,8 +981,9 @@
       } else if (destino === '*visitada') {
         destino = world.rng.pick(world.visited);
       }
+      def._destinoResuelto = destino; // para reconocer esta salida al volver
       world.prevStack.push(world.level.id);
-      enterLevel(destino, def.texto);
+      enterLevel(destino, def.texto, { sinRetorno: esSinRetorno(def) });
     };
 
     if (tipo === 'arriesgada' && def.riesgoVoid > 0) {
@@ -828,7 +1042,7 @@
         player: {
           salud: world.player.salud, cordura: world.player.cordura,
           sed: world.player.sed, hambre: world.player.hambre,
-          inv: world.player.inv,
+          inv: world.player.inv, manos: world.player.manos,
         },
         journal: world.journal,
         visited: world.visited,
@@ -847,16 +1061,18 @@
   function continueRun(s) {
     world.runSeed = s.runSeed;
     world.player = {
-      x: 0, y: 0, rx: 0, ry: 0,
+      x: 0, y: 0, rx: 0, ry: 0, dir: 'down', flip: false, rot: 2,
       salud: s.player.salud, cordura: s.player.cordura,
       sed: s.player.sed, hambre: s.player.hambre,
-      inv: s.player.inv, luz: false, viva: true,
+      inv: s.player.inv, manos: s.player.manos || [null, null],
+      luz: false, viva: true,
     };
     world.journal = s.journal;
     world.visited = s.visited.slice(0, -0) || [];
     world.visited = s.visited;
     world.prevStack = s.prevStack;
     world.entryCount = s.entryCount;
+    world.savedLevels = {};   // los snapshots no se serializan: viven en memoria
     // repite la entrada al nivel guardado sin duplicar el diario
     world.entryCount[s.levelId] = Math.max(0, (world.entryCount[s.levelId] || 1) - 1);
     world.turnTotal = s.turnTotal;
@@ -867,6 +1083,7 @@
 
   window.Game = {
     world, startRun, continueRun, loadSave, Profiles,
-    tryMove, wait, interact, toggleLuz, useItem, volver, crossExit,
+    tryMove, wait, interact, toggleLuz, useItem, crossExit,
+    girar, avanzar, equipar, desequipar,
   };
 })();

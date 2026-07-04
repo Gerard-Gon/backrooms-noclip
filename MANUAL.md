@@ -9,41 +9,46 @@ Guía de todo lo que puedes hacer/modificar tú mismo, sin programar.
 
 **Doble clic en `game/index.html`.** Nada que instalar. Funciona sin internet.
 
-El juego se renderiza en **3D real** (motor Three.js incluido en el proyecto) con cámara
-inclinada estilo Octopath Traveler, **iluminación dinámica** (fluorescentes y farolas con
-halo), **postprocesado cinematográfico** (bloom + tone mapping) y polvo en suspensión.
-Si algún equipo no soporta WebGL o prefieres la vista cenital 2D clásica: `index.html?render=2d`.
-Si va lento: `index.html?nofx=1` desactiva todos los efectos (también el postprocesado).
+El juego se renderiza en **3D real en TERCERA PERSONA** (motor Three.js incluido): la cámara
+va pegada a la espalda del errante, los niveles interiores tienen **techo real con
+fluorescentes**, bloom cinematográfico y polvo en suspensión. Alternativas por URL:
+`?cam=alta` (cámara cenital estilo Octopath de versiones anteriores), `?render=2d` (vista
+2D clásica), `?nofx=1` (sin efectos, por si va lento).
 
 | Tecla | Acción |
 |---|---|
-| WASD / flechas | Moverte (1 paso = 1 turno; el mundo solo avanza cuando tú actúas) |
-| ESPACIO | Interactuar: cruzar salidas y **registrar muebles** (taquillas, neveras… tirada de dado) |
-| Q / E | Girar la cámara 90° a izquierda/derecha (las flechas son relativas a la pantalla) |
-| — | La cámara también **gira sola**: dos pasos seguidos hacia un lado y rota para seguirte |
+| W / ↑ | Avanzar un paso hacia donde miras (1 paso = 1 turno) |
+| S / ↓ | Retroceder un paso (sin girarte) |
+| A / D (o Q / E) | Girarte 90° a izquierda/derecha — girar es GRATIS, no gasta turno |
+| ESPACIO | Interactuar: salidas, muebles registrables, **beber agua**… |
 | X | Esperar un turno |
-| F | Linterna: cono de luz real, más alcance y la niebla se abre (¡atrae a las Deathmoths!) |
-| R | Volver al nivel anterior (cuesta cordura) |
+| F | Linterna (debe estar EN UNA MANO): cono de luz real (¡atrae a las Deathmoths!) |
+| B | Abrir/cerrar la **mochila** |
+| M (o N) | Ver el mapa de lo explorado |
 | J | Diario de ruta de la partida |
-| C | Códice del Errante (tu expediente permanente) |
-| M | Silenciar / activar el sonido |
-| N | Ampliar el minimapa (también con clic sobre él) |
-| 1-6 | Usar objeto del inventario |
+| C | Códice del Errante (expediente y colección) |
+| 1-6 | Usar objeto de la mochila |
 
-*(La tira de teclas también aparece siempre en la parte superior de la pantalla de juego.)*
+*(La lista de controles vive también en el menú de ajustes ⚙, junto al volumen.)*
 
 - **Objetivo**: encontrar una de las rarísimas rutas de escape (⭐). La muerte es permanente.
-- Los muebles con **brillo dorado** se pueden registrar con `E`.
-- En niveles seguros (peligro 0-1) la cordura se recupera sola poco a poco: úsalos para descansar.
-- **Minimapa** (esquina superior derecha): dibuja lo que has explorado y **lo conserva siempre**.
-  Solo cambia si el nivel de verdad se reorganiza (Level 0, 27, 130…): lo oirás como un
-  derrumbe lejano, y esa zona (solo esa) volverá a quedar sin cartografiar. Clic o `N` amplía.
-- **Objetos**: clic en un objeto del inventario → ventana con su información y botón USAR.
-  Las teclas 1-6 lo usan directamente sin abrir la ventana.
+- **HUD contextual**: no hay barras de vida ni contador de turnos. Tu personaje **piensa en
+  bocadillos** («Tengo la garganta seca…», «Estoy malherido…») y su propio sprite se ve
+  ensangrentado cuando está grave. Los estados los llevas TÚ en la cabeza, como él.
+- **Volver atrás**: ya no hay tecla mágica. La única manera de regresar es **la puerta por la
+  que llegaste** (queda marcada donde apareces) — y cada nivel se conserva TAL CUAL lo
+  dejaste. Excepción: si CAÍSTE (agujero, trampilla, vacío), no hay vuelta: nadie escala eso.
+- **Manos y mochila**: dos ranuras de mano (abajo a la derecha) + mochila de 6 huecos (`B`).
+  La linterna y las armas solo funcionan **empuñadas**: arrastra el objeto a una mano (o
+  botón EMPUÑAR en su ficha). Clic en una mano la guarda de vuelta. Los pasivos (chaqueta,
+  trébol, detector…) funcionan con solo llevarlos encima.
+- **Interacciones libres**: si hay agua, PUEDES bebértela (ESPACIO)… la wiki decide si era
+  buena idea. Este patrón irá creciendo: el juego te deja hacer, el lore responde.
+- El **mapa** (`M`) dibuja solo lo explorado y lo conserva; si el nivel se reorganiza
+  (Level 0, 27…) lo oirás como un derrumbe y esa zona vuelve a quedar sin cartografiar.
 - **Salidas rituales**: algunas salidas no son puertas — son el objeto exacto que dice la wiki
-  (la nave de juguete de Level 483, el reloj digital de Level 80, la máquina expendedora del
-  asilo…). Si lees la wiki, sabrás qué buscar. Todas las salidas documentadas de cada nivel
-  están en el juego (las que llevan fuera del piloto aparecen grises/selladas).
+  (la nave de juguete de Level 483, el reloj digital de Level 80…). Todas las salidas
+  documentadas de cada nivel están en el juego (las de fuera del piloto, grises/selladas).
 
 ### Combate y defensa
 
@@ -65,6 +70,10 @@ genera exactamente los mismos mapas. Ideal para que tu chat juegue tu misma part
 - Crea tu perfil en el título (puedes tener varios: uno por serie, uno para el chat…).
 - El **Códice** (tecla `C`) guarda para siempre: niveles transitados con su descripción,
   veces visitado, mejor marca de turnos, escapes y tu historial de expediciones.
+- **Colección** (dentro del códice): TODAS las entidades, objetos y salidas de cada nivel
+  aparecen como coleccionables tapados con «???» (las entidades, como siluetas negras)
+  hasta que los descubres jugando: ver una salida la desbloquea, avistar una entidad la
+  revela, recoger un objeto lo cataloga. Ideal para completistas del stream.
 - **Exportar** descarga tu perfil como archivo JSON (guárdalo como copia de seguridad).
 - **Importar** lo restaura en otro navegador u ordenador.
 - ⚠️ Los perfiles viven en el navegador: si borras los datos de navegación, se pierden

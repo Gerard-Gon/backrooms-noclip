@@ -102,40 +102,52 @@
   };
   document.getElementById('btn-snd-close').onclick = cerrarSndMenu;
   document.getElementById('btn-sound-menu').onclick = abrirSndMenu;
+  // mochila (v15): botón del HUD y cierre del panel
+  const btnMochila = document.getElementById('btn-mochila');
+  if (btnMochila) {
+    if (window.Icons) btnMochila.appendChild(Icons.img('mochila', 26));
+    btnMochila.onclick = () => world.ui.toggleBackpack();
+  }
+  const btnBpClose = document.getElementById('btn-backpack-close');
+  if (btnBpClose) btnBpClose.onclick = () => world.ui.toggleBackpack(false);
   const btnSndTitle = document.getElementById('btn-sound-menu-title');
   if (btnSndTitle) btnSndTitle.onclick = abrirSndMenu;
 
   document.addEventListener('keydown', (ev) => {
-    if (ev.code === 'KeyM') {
-      const m = Sfx.toggleMute();
-      if (world.level && world.ui) world.ui.log(m ? 'Sonido silenciado.' : 'Sonido activado.', 'event');
-      return;
-    }
     if (!world.level || world.over) return;
     if (document.getElementById('screen-card').style.display !== 'none') return;
+    const tercera = use3D && Render3D.modo === 'tercera';
     if (KEYS[ev.code]) {
       ev.preventDefault();
       const [sdx, sdy] = KEYS[ev.code]; // dirección de PANTALLA pulsada
-      let dx = sdx, dy = sdy;
-      // con la cámara rotada, las flechas son relativas a la pantalla
-      if (use3D && Render3D.rot) {
-        const th = -Render3D.rot * Math.PI / 2;
-        const rx = Math.round(Math.cos(th) * dx - Math.sin(th) * dy);
-        const ry = Math.round(Math.sin(th) * dx + Math.cos(th) * dy);
-        dx = rx; dy = ry;
+      if (tercera) {
+        // 3ª persona: W avanza, S retrocede, A/D giran al personaje (gratis)
+        if (sdy === -1) Game.avanzar(1);
+        else if (sdy === 1) Game.avanzar(-1);
+        else Game.girar(sdx);
+      } else {
+        let dx = sdx, dy = sdy;
+        // con la cámara rotada, las flechas son relativas a la pantalla
+        if (use3D && Render3D.rot) {
+          const th = -Render3D.rot * Math.PI / 2;
+          const rx = Math.round(Math.cos(th) * dx - Math.sin(th) * dy);
+          const ry = Math.round(Math.sin(th) * dx + Math.cos(th) * dy);
+          dx = rx; dy = ry;
+        }
+        Game.tryMove(dx, dy);
       }
-      Game.tryMove(dx, dy);
     } else if (ev.code === 'KeyQ' || ev.code === 'KeyE') {
-      if (use3D) Render3D.rotar(ev.code === 'KeyQ' ? 1 : -1);
+      if (tercera) Game.girar(ev.code === 'KeyQ' ? -1 : 1);
+      else if (use3D) Render3D.rotar(ev.code === 'KeyQ' ? 1 : -1);
     } else if (ev.code === 'Space') {
       ev.preventDefault();
       Game.interact();
     } else if (ev.code === 'KeyX') Game.wait();
     else if (ev.code === 'KeyF') Game.toggleLuz();
-    else if (ev.code === 'KeyR') Game.volver();
+    else if (ev.code === 'KeyB') world.ui.toggleBackpack();
     else if (ev.code === 'KeyJ') world.ui.toggleJournal();
     else if (ev.code === 'KeyC') world.ui.toggleCodex();
-    else if (ev.code === 'KeyN') Minimap.toggleBig();
+    else if (ev.code === 'KeyM' || ev.code === 'KeyN') Minimap.toggleBig();
     else if (ev.code === 'Escape' && Minimap.visible) Minimap.toggleBig(false);
     else if (/^Digit[1-6]$/.test(ev.code)) Game.useItem(parseInt(ev.code.slice(5), 10) - 1);
   });
@@ -217,7 +229,10 @@
     window.onerror = (msg, src, line) => { errores.push(`${msg} @${(src || '').split('/').pop()}:${line}`); };
     const N = parseInt(params.get('selftest'), 10) || 100;
     Game.startRun(params.get('seed') || 'selftest');
-    if (params.get('arma')) world.player.inv.push('tuberia', 'fuego_griego', 'detector');
+    if (params.get('arma')) {
+      world.player.inv.push('fuego_griego', 'detector');
+      world.player.manos[0] = 'tuberia'; // el arma va EN LA MANO (v15)
+    }
     setTimeout(() => document.getElementById('btn-enter')?.click(), 30);
     let acciones = 0;
     const dirs = [[0, -1], [0, 1], [-1, 0], [1, 0]];
@@ -247,7 +262,6 @@
             erroresRender: window.__renderErrors || [],
             remodel: window.__remodelResultado || null,
             ventanas: world.ventanaN || 0,
-            luminarias: window.__ATMOS_LUM ?? null,
           });
           document.body.appendChild(div);
           document.title = errores.length ? 'SELFTEST-ERRORES' : 'SELFTEST-OK';

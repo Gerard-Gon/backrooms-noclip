@@ -32,6 +32,15 @@
     list.push({ type: 'proy', x0, y0, x1, y1, color, t0: now(), dur: 380 });
   }
 
+  // bocadillo de pensamiento sobre el personaje (HUD contextual v15);
+  // se encolan: nunca se pisan dos a la vez
+  let bubbleEnd = 0;
+  function bubble(wx, wy, txt) {
+    const t0 = Math.max(now(), bubbleEnd);
+    list.push({ type: 'bub', wx, wy, txt, t0, dur: 2600 });
+    bubbleEnd = t0 + 2200;
+  }
+
   function doShake(mag = 5, dur = 160) {
     shake = { mag, until: now() + dur };
   }
@@ -47,10 +56,34 @@
     list = list.filter((e) => t - e.t0 < e.dur);
     const P = proj || ((wx, wy) => [wx * TILE - camX + TILE / 2, wy * TILE - camY + TILE / 2]);
     for (const e of list) {
+      if (t < e.t0) continue; // bocadillos en cola: aún no les toca
       // el timestamp del rAF puede ir ligeramente por detrás de performance.now()
       const k = Math.min(1, Math.max(0, (t - e.t0) / e.dur));
       const [sx, sy] = P(e.wx, e.wy);
       ctx.save();
+      if (e.type === 'bub') {
+        // fundido de entrada/salida
+        const a = Math.min(1, k * 8, (1 - k) * 5);
+        ctx.globalAlpha = Math.max(0, a);
+        ctx.font = '16px VT323, "Courier New", monospace';
+        const tw = ctx.measureText(e.txt).width;
+        const bw = tw + 18, bh = 26;
+        const bx = sx - bw / 2, by = sy - 92;
+        ctx.fillStyle = 'rgba(14,12,9,0.92)';
+        ctx.strokeStyle = '#8a7a3d';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(bx, by, bw, bh, 4);
+        ctx.fill(); ctx.stroke();
+        ctx.beginPath();                               // cola del bocadillo
+        ctx.moveTo(sx - 5, by + bh); ctx.lineTo(sx + 5, by + bh); ctx.lineTo(sx, by + bh + 8);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#efe8d0';
+        ctx.textAlign = 'center';
+        ctx.fillText(e.txt, sx, by + 18);
+        ctx.restore();
+        continue;
+      }
       if (e.type === 'num') {
         ctx.globalAlpha = 1 - k * k;
         ctx.font = 'bold 15px "Courier New", monospace';
@@ -102,5 +135,5 @@
     }
   }
 
-  window.Effects = { number, particles, flash, proyectil, doShake, shakeOffset, draw, clear() { list = []; } };
+  window.Effects = { number, particles, flash, proyectil, bubble, doShake, shakeOffset, draw, clear() { list = []; } };
 })();

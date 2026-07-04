@@ -507,6 +507,28 @@
   function build() {
     for (const [id, def] of Object.entries(DEFS))
       cache[id] = def.frames.map((rows) => rasterize(def.pal, rows));
+    // variantes HERIDO del jugador (v15): sangre y palidez sobre el sprite base
+    // — el HUD sin barras comunica la salud con el propio personaje
+    for (const id of ['player_down', 'player_up', 'player_side'])
+      if (cache[id]) cache[id + '_herido'] = cache[id].map(herir);
+  }
+
+  function herir(base) {
+    const c = document.createElement('canvas');
+    c.width = base.width; c.height = base.height;
+    const x = c.getContext('2d');
+    x.drawImage(base, 0, 0);
+    x.globalCompositeOperation = 'source-atop'; // solo pinta SOBRE el cuerpo
+    x.fillStyle = 'rgba(122,26,18,0.95)';       // manchas de sangre
+    const w = c.width;
+    for (const [mx, my, mw, mh] of [
+      [w * 0.40, w * 0.42, 5, 7], [w * 0.56, w * 0.50, 6, 5],
+      [w * 0.34, w * 0.62, 5, 5], [w * 0.52, w * 0.74, 7, 4],
+      [w * 0.47, w * 0.30, 4, 4],
+    ]) x.fillRect(mx, my, mw, mh);
+    x.fillStyle = 'rgba(200,200,215,0.14)';     // palidez general
+    x.fillRect(0, 0, w, c.height);
+    return c;
   }
 
   const mirrorCache = {};
@@ -540,6 +562,7 @@
     if (overrides[id]) return overrides[id].length;
     return cache[id] ? cache[id].length : 2;
   }
+  const tiene = (id) => !!(overrides[id] || cache[id]);
 
   // intenta cargar PNGs externos (hoja horizontal de frames de 48×48)
   function tryOverrides(ids) {
@@ -722,5 +745,5 @@
   }
 
   build();
-  window.Sprites = { get, tryOverrides, drawProp, frameCount, list: () => Object.keys(DEFS) };
+  window.Sprites = { get, tryOverrides, drawProp, frameCount, tiene, list: () => Object.keys(DEFS) };
 })();
