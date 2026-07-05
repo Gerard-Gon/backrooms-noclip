@@ -53,14 +53,25 @@
   }
 
   // ---------- opciones persistentes (v16) ----------
-  window.OPTS = { dado: true };
-  try { Object.assign(window.OPTS, JSON.parse(localStorage.getItem('backrooms-opts')) || {}); }
-  catch (e) { /* opciones corruptas: valores por defecto */ }
+  const defaultGamepadMap = {
+    interact: 0, wait: 2, light: 3, handL: 4, handR: 5, backpack: 8, menu: 9
+  };
+  window.OPTS = { dado: true, cursorSpeed: 8, gamepadMap: Object.assign({}, defaultGamepadMap) };
+  try { 
+    const saved = JSON.parse(localStorage.getItem('backrooms-opts')) || {};
+    Object.assign(window.OPTS, saved);
+    if (!OPTS.gamepadMap) OPTS.gamepadMap = Object.assign({}, defaultGamepadMap);
+  } catch (e) { /* opciones corruptas: valores por defecto */ }
+  
+  function guardarOpciones() {
+    try { localStorage.setItem('backrooms-opts', JSON.stringify(OPTS)); } catch (e) {}
+  }
+
   const optDado = document.getElementById('opt-dado');
   optDado.checked = OPTS.dado;
   optDado.onchange = () => {
     OPTS.dado = optDado.checked;
-    try { localStorage.setItem('backrooms-opts', JSON.stringify(OPTS)); } catch (e) {}
+    guardarOpciones();
   };
 
   // ---------- menú de ajustes de sonido ----------
@@ -146,6 +157,98 @@
   if (btnBpClose) btnBpClose.onclick = () => world.ui.toggleBackpack(false);
   const btnSndTitle = document.getElementById('btn-sound-menu-title');
   if (btnSndTitle) btnSndTitle.onclick = abrirSndMenu;
+
+  // ---------- ajustes de mando ----------
+  const btnGamepadSettings = document.getElementById('btn-gamepad-settings');
+  const gamepadMenu = document.getElementById('gamepad-menu');
+  const gamepadList = document.getElementById('gamepad-mapping-list');
+  const gamepadWaitMsg = document.getElementById('gamepad-wait-msg');
+  const optCursorSpeed = document.getElementById('opt-cursor-speed');
+  const optCursorSpeedV = document.getElementById('opt-cursor-speed-v');
+  let isWaitingForButton = false;
+  let currentActionToMap = null;
+
+  if (btnGamepadSettings) {
+    btnGamepadSettings.onclick = () => {
+      sndMenu.style.display = 'none';
+      gamepadMenu.style.display = 'flex';
+      optCursorSpeed.value = OPTS.cursorSpeed;
+      optCursorSpeedV.textContent = OPTS.cursorSpeed;
+      renderGamepadList();
+    };
+  }
+  
+  if (optCursorSpeed) {
+    optCursorSpeed.oninput = () => {
+      OPTS.cursorSpeed = parseInt(optCursorSpeed.value, 10);
+      optCursorSpeedV.textContent = OPTS.cursorSpeed;
+      guardarOpciones();
+    };
+  }
+  
+  const btnGamepadClose = document.getElementById('btn-gamepad-close');
+  if (btnGamepadClose) {
+    btnGamepadClose.onclick = () => {
+      gamepadMenu.style.display = 'none';
+      abrirSndMenu();
+    };
+  }
+
+  const btnGamepadDefault = document.getElementById('btn-gamepad-default');
+  if (btnGamepadDefault) {
+    btnGamepadDefault.onclick = () => {
+      if (confirm('¿Restablecer controles por defecto?')) {
+        OPTS.gamepadMap = Object.assign({}, defaultGamepadMap);
+        OPTS.cursorSpeed = 8;
+        optCursorSpeed.value = 8;
+        optCursorSpeedV.textContent = 8;
+        guardarOpciones();
+        renderGamepadList();
+      }
+    };
+  }
+  
+  function renderGamepadList() {
+    if (!gamepadList) return;
+    gamepadList.innerHTML = '';
+    const actions = [
+      { id: 'interact', label: 'Interactuar / Aceptar / Cursor' },
+      { id: 'wait', label: 'Esperar un turno' },
+      { id: 'light', label: 'Encender/Apagar linterna' },
+      { id: 'handL', label: 'Usar mano izquierda (Q)' },
+      { id: 'handR', label: 'Usar mano derecha (E)' },
+      { id: 'backpack', label: 'Mochila' },
+      { id: 'menu', label: 'Menú / Cerrar' }
+    ];
+    for (const action of actions) {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.justifyContent = 'space-between';
+      row.style.alignItems = 'center';
+      row.style.marginBottom = '6px';
+      
+      const lbl = document.createElement('span');
+      lbl.textContent = action.label;
+      
+      const btn = document.createElement('button');
+      btn.className = 'btn-small';
+      btn.style.marginTop = '0';
+      btn.textContent = 'Botón ' + OPTS.gamepadMap[action.id];
+      
+      btn.onclick = () => {
+        if (isWaitingForButton) return;
+        isWaitingForButton = true;
+        currentActionToMap = action.id;
+        gamepadWaitMsg.style.display = 'block';
+        btn.textContent = '...';
+        btn.style.color = 'var(--amarillo)';
+      };
+      
+      row.appendChild(lbl);
+      row.appendChild(btn);
+      gamepadList.appendChild(row);
+    }
+  }
 
   let lastStepT = 0; // mantener pulsado = velocidad CONSTANTE (v16)
   document.addEventListener('keydown', (ev) => {
@@ -233,6 +336,21 @@
 
     const uiOpen = isUIOpen();
 
+    if (isWaitingForButton) {
+      for (let i = 0; i < btns.length; i++) {
+        if (justPressed(i)) {
+          OPTS.gamepadMap[currentActionToMap] = i;
+          isWaitingForButton = false;
+          if (gamepadWaitMsg) gamepadWaitMsg.style.display = 'none';
+          guardarOpciones();
+          renderGamepadList();
+          break;
+        }
+      }
+      for (let i = 0; i < btns.length; i++) lastGamepadState[i] = pressed(i);
+      return;
+    }
+
     let dx = 0, dy = 0;
     if (pressed(14) || gp.axes[0] < -0.4) dx = -1;
     if (pressed(15) || gp.axes[0] > 0.4) dx = 1;
@@ -262,8 +380,8 @@
       }
       
       if (dx !== 0 || dy !== 0) {
-        cursorX += dx * 12;
-        cursorY += dy * 12;
+        cursorX += dx * OPTS.cursorSpeed;
+        cursorY += dy * OPTS.cursorSpeed;
         cursorX = Math.max(0, Math.min(window.innerWidth, cursorX));
         cursorY = Math.max(0, Math.min(window.innerHeight, cursorY));
         vCursor.style.left = cursorX + 'px';
@@ -271,19 +389,22 @@
       }
 
       const target = document.elementFromPoint(cursorX, cursorY);
+      const aBtnIdx = OPTS.gamepadMap.interact;
+      const bBtnIdx = OPTS.gamepadMap.menu;
+      const bpBtnIdx = OPTS.gamepadMap.backpack;
       
-      if (justPressed(0)) {
+      if (justPressed(aBtnIdx)) {
         aButtonDown = true;
         vCursor.classList.add('vc-active');
         if (target) {
           target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: cursorX, clientY: cursorY }));
           dragTarget = target;
         }
-      } else if (pressed(0) && (dx !== 0 || dy !== 0) && aButtonDown) {
+      } else if (pressed(aBtnIdx) && (dx !== 0 || dy !== 0) && aButtonDown) {
         if (target) {
           target.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, clientX: cursorX, clientY: cursorY }));
         }
-      } else if (!pressed(0) && aButtonDown) {
+      } else if (!pressed(aBtnIdx) && aButtonDown) {
         aButtonDown = false;
         vCursor.classList.remove('vc-active');
         if (target) {
@@ -295,7 +416,7 @@
         dragTarget = null;
       }
 
-      if (justPressed(1) || justPressed(8) || justPressed(9)) {
+      if (justPressed(bBtnIdx) || justPressed(bpBtnIdx)) {
         document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape' }));
       }
     } else {
@@ -336,19 +457,19 @@
         }
       }
 
-      if (justPressed(0)) Game.interact();
-      if (justPressed(2)) Game.wait();
-      if (justPressed(3)) Game.toggleLuz();
-      if (justPressed(4)) {
+      if (justPressed(OPTS.gamepadMap.interact)) Game.interact();
+      if (justPressed(OPTS.gamepadMap.wait)) Game.wait();
+      if (justPressed(OPTS.gamepadMap.light)) Game.toggleLuz();
+      if (justPressed(OPTS.gamepadMap.handL)) {
         if (use3D && window.Render3D && Render3D.modo !== 'tercera') Render3D.rotar(1);
         else Game.usarMano(0);
       }
-      if (justPressed(5)) {
+      if (justPressed(OPTS.gamepadMap.handR)) {
         if (use3D && window.Render3D && Render3D.modo !== 'tercera') Render3D.rotar(-1);
         else Game.usarMano(1);
       }
-      if (justPressed(8)) world.ui.toggleBackpack();
-      if (justPressed(9)) document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape' }));
+      if (justPressed(OPTS.gamepadMap.backpack)) world.ui.toggleBackpack();
+      if (justPressed(OPTS.gamepadMap.menu)) document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape' }));
     }
 
     for(let i=0; i<btns.length; i++) lastGamepadState[i] = pressed(i);
