@@ -26,8 +26,19 @@
       id: j.id, nombre: j.nombre, x: j.x, y: j.y,
       rx: j.x, ry: j.y, rot: j.rot ?? 2,
       chat: null, chatT: 0,
+      escondido: !!j.escondido, luz: false,
     });
     sincroniza();
+  }
+
+  function esconde(id, si) {
+    const o = porId.get(id);
+    if (o) o.escondido = !!si;
+  }
+
+  function luz(id, si) {
+    const o = porId.get(id);
+    if (o) o.luz = !!si;
   }
 
   function sale(id) {
@@ -114,6 +125,7 @@
   function overlay(ctx, proj, world, t) {
     frame();
     for (const o of porId.values()) {
+      if (o.escondido) continue; // dentro de una taquilla no hay nombre que leer
       const [sx, sy] = proj(o.rx, o.ry);
       if (sx < -80 || sy < -80 || sx > ctx.canvas.width + 80 || sy > ctx.canvas.height + 80) continue;
       nombre(ctx, sx, sy, o.nombre);
@@ -142,6 +154,6 @@
     return ['player_side', rel === 3];
   }
 
-  window.Otros = { reset, entra, sale, mueve, gira, chat, overlay, spriteDe, frame,
+  window.Otros = { reset, entra, sale, mueve, gira, chat, esconde, luz, overlay, spriteDe, frame,
     get lista() { return [...porId.values()]; } };
 })();

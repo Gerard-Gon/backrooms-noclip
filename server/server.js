@@ -10,7 +10,8 @@ const path = require('path');
 const { WebSocketServer } = require('ws');
 const P = require('./protocolo');
 const filtro = require('./filtro');
-const { asignar, estado } = require('./sala');
+const { asignar, tickTodas, estado } = require('./sala');
+const { DATA } = require('./sim/mundo');
 
 const PUERTO = parseInt(process.argv[2], 10) || 8080;
 const RAIZ = path.join(__dirname, '..', 'game');
@@ -72,14 +73,22 @@ wss.on('connection', (ws, req) => {
     if (m.t === 'hola') {
       if (jug) return; // ya presentado
       clearTimeout(timbre);
-      sala = asignar(NIVEL_INICIAL);
+      // ?nivel= de desarrollo: entrar directo a otro nivel (se cierra en M4)
+      const nivel = m.nivel && DATA.levels[m.nivel] ? m.nivel : NIVEL_INICIAL;
+      sala = asignar(nivel);
+      sala.alCruzar = cambiarDeSala;
       jug = sala.entrar(ws, filtro.nombreLimpio(m.nombre), m.token);
+      jug._reSala = (s) => { sala = s; };  // el cruce actualiza la sala del socket
       console.log(`[+] ${jug.nombre}#${jug.id} → ${sala.clave} (${sala.jugadores.size})`);
       return;
     }
     if (!jug) return; // todo lo demás exige estar dentro
     if (m.t === 'mover') sala.mover(jug, m.dx, m.dy);
     else if (m.t === 'rot') sala.girar(jug, m.rot);
+    else if (m.t === 'accion') sala.accion(jug);
+    else if (m.t === 'cruzar') sala.cruzar(jug, m.si);
+    else if (m.t === 'usar') sala.usar(jug, m.mano);
+    else if (m.t === 'luz') sala.luz(jug, m.si);
     else if (m.t === 'chat') {
       const txt = filtro.chatLimpio(m.txt);
       if (txt) sala.chat(jug, txt);
@@ -96,6 +105,31 @@ wss.on('connection', (ws, req) => {
   });
   ws.on('error', () => {});
 });
+
+// cruce de salas: sacar de la sala vieja, meter en la del nivel destino y
+// mandar el estado nuevo (el cliente reconstruye el mapa desde la semilla)
+function cambiarDeSala(jug, salaVieja, defSalida) {
+  salaVieja.salir(jug);
+  const nueva = asignar(defSalida.destino);
+  nueva.alCruzar = cambiarDeSala;
+  const [x, y] = nueva.buscarSpawn();
+  jug.x = x; jug.y = y;
+  jug.ofertaEn = null; jug.canal = null; jug.escondido = null;
+  const id = jug.id;
+  nueva.jugadores.set(id, jug);
+  nueva.enviar(jug.ws, {
+    t: 'nivel', nivel: nueva.nivelId, inst: nueva.inst, semilla: nueva.semilla,
+    x, y, rot: jug.rot, via: defSalida.texto,
+    salud: jug.salud, inv: jug.inv, manos: jug.manos,
+    jugadores: nueva.censo(), ...nueva.estadoDinamico(),
+  });
+  nueva.difundir({ t: 'entra', id, nombre: jug.nombre, x, y, rot: jug.rot }, id);
+  if (jug._reSala) jug._reSala(nueva);
+  console.log(`[→] ${jug.nombre}#${id} cruza a ${nueva.clave}`);
+}
+
+// simulación: 10 Hz para todas las salas con gente dentro
+setInterval(() => tickTodas(Date.now()), 100);
 
 // latido: conexiones muertas fuera cada 30 s
 setInterval(() => {

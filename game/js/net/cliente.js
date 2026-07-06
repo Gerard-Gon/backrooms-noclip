@@ -5,8 +5,8 @@
 (function () {
   let ws = null;
   let miId = null;
-  let listo = false;        // bienvenida recibida y mundo construido
-  let ultPaso = 0;          // cooldown local de paso (170 ms; el servidor pide 165)
+  let listo = false;
+  let ultPaso = 0;
   let reintento = null;
   let inputChat = null;
 
@@ -21,7 +21,6 @@
     return 'ws://localhost:8080/ws'; // desarrollo desde file://
   }
 
-  // token persistente: tu identidad anónima (códice/stats en M3 cuelgan de él)
   function token() {
     try {
       let t = localStorage.getItem('mmo-token');
@@ -40,8 +39,12 @@
 
   function iniciar(nombre) {
     const w = Game.world;
+    const params = new URLSearchParams(location.search);
     ws = new WebSocket(urlServidor());
-    ws.onopen = () => enviar({ t: 'hola', nombre, token: token(), v: 1 });
+    ws.onopen = () => enviar({
+      t: 'hola', nombre, token: token(), v: 1,
+      nivel: params.get('nivel') || undefined, // puerta de desarrollo (M4 la cierra)
+    });
     ws.onmessage = (ev) => {
       let m;
       try { m = JSON.parse(ev.data); } catch (e) { return; }
@@ -56,15 +59,48 @@
     ws.onerror = () => {};
   }
 
+  function nombreDe(id) {
+    if (id === miId) return 'Tú';
+    const o = Otros.lista.find((x) => x.id === id);
+    return o ? o.nombre : '???';
+  }
+
+  function entidadDe(uid) {
+    return Game.world.entities.find((e) => e.uid === uid);
+  }
+
+  function posDe(id) {
+    const w = Game.world;
+    if (id === miId) return [w.player.x, w.player.y, w.player];
+    const o = Otros.lista.find((x) => x.id === id);
+    return o ? [o.x, o.y, o] : null;
+  }
+
   function recibir(m, w) {
     switch (m.t) {
-      case 'bienvenida': construirMundo(m, w); break;
+      case 'bienvenida':
+        miId = m.id;
+        Game.startRun(m.semilla); // jugador, HUD y tarjeta de presentación
+        construirNivel(m, w);
+        w.log(`Estás en ${w.level.nombre} · instancia ${m.inst}. Pulsa T para hablar.`, 'good');
+        crearChatUI();
+        break;
+      case 'nivel': { // cruce de salida: nivel nuevo con su tarjeta
+        construirNivel(m, w);
+        const def = w.level;
+        w.ui.showLevelCard(def, () => {
+          w.ui.updateHUD();
+          w.log(`— ${def.nombre} —`, 'event');
+          if (m.via) w.log(m.via, 'event');
+          if (window.Sfx) { Sfx.stopAmbient(); Sfx.ambient(def); }
+        });
+        break;
+      }
       case 'entra': if (listo) Otros.entra(m); break;
       case 'sale': if (listo) Otros.sale(m.id); break;
       case 'mueve':
         if (!listo) return;
         if (m.id === miId) {
-          // corrección autoritativa: solo si el servidor discrepa de la predicción
           if (m.x !== w.player.x || m.y !== w.player.y) {
             w.player.x = m.x; w.player.y = m.y;
             fov(w);
@@ -75,42 +111,172 @@
       case 'chat':
         if (!listo) return;
         Otros.chat(m.id, m.txt, performance.now());
-        // el chat también queda en el registro pequeño
-        w.log(`${m.id === miId ? 'Tú' : nombreDe(m.id)}: ${m.txt}`, 'event');
+        w.log(`${nombreDe(m.id)}: ${m.txt}`, 'event');
         break;
+
+      // ---------- entidades ----------
+      case 'entMueve': { const e = entidadDe(m.uid); if (e) { e.x = m.x; e.y = m.y; } break; }
+      case 'entPrep': {
+        const e = entidadDe(m.uid);
+        if (!e) return;
+        e.preparando = true;
+        if (window.Effects) Effects.number(e.x, e.y, '⚠', '#ffd860');
+        if (window.Sfx && cerca(w, e.x, e.y, 10)) Sfx.cue('generico');
+        break;
+      }
+      case 'entAtaca': {
+        const e = entidadDe(m.uid);
+        if (e) { e.preparando = false; e._atkT = performance.now(); }
+        if (m.id === miId) {
+          if (window.Effects) { Effects.doShake(6, 180); Effects.particles(w.player.x, w.player.y, '#b03030', 12); }
+          if (window.Sfx) Sfx.play('golpe');
+          w.log(`¡${e ? e.def.nombre : 'Algo'} te ataca!`, 'danger');
+        }
+        break;
+      }
+      case 'entFalla': {
+        const e = entidadDe(m.uid);
+        if (!e) return;
+        e.preparando = false;
+        if (cerca(w, e.x, e.y, 8)) w.log(`${e.def.nombre} desgarra el aire.`, 'good');
+        break;
+      }
+      case 'entMuere': { const e = entidadDe(m.uid); if (e) e.viva = false; break; }
+      case 'entHit': { const e = entidadDe(m.uid); if (e) e._hitT = performance.now(); break; }
+      case 'entRevela': {
+        const e = entidadDe(m.uid);
+        if (!e) return;
+        e.revelada = true;
+        if (cerca(w, e.x, e.y, 10)) w.log(`Esa figura no era humana. ¡${e.def.nombre}!`, 'danger');
+        break;
+      }
+      case 'aviso2': w.log(m.txt, 'danger'); break;
+
+      // ---------- estado propio ----------
+      case 'salud':
+        w.player.salud = m.valor;
+        w.ui.updateHUD();
+        break;
+      case 'inv':
+        w.player.inv = m.inv;
+        w.player.manos = m.manos;
+        w.ui.updateHUD();
+        break;
+      case 'muere':
+        if (m.id === miId) {
+          w.log(`La oscuridad te traga (${m.causa}).`, 'danger');
+          if (window.Effects) Effects.doShake(9, 400);
+          if (window.Sfx) Sfx.play('muerte');
+        } else {
+          const p = posDe(m.id);
+          if (p && cerca(w, p[0], p[1], 12)) w.log(`${nombreDe(m.id)} cae al suelo…`, 'danger');
+        }
+        break;
+
+      // ---------- objetos y salidas ----------
+      case 'itemCogido': {
+        const it = w.map.items[m.idx];
+        if (it) it.taken = true;
+        w.itemsVersion = (w.itemsVersion || 0) + 1;
+        if (m.por === miId) {
+          const def = w.data.objects[m.id];
+          w.log(`Recoges: ${def ? def.nombre : m.id}.`, 'good');
+          if (window.Sfx) Sfx.play('recoger');
+        }
+        break;
+      }
+      case 'dado': {
+        const p = posDe(m.id);
+        if (p && window.Effects)
+          Effects.number(p[0], p[1], `d20 → ${m.valor}`, m.exito ? '#a8d8a0' : '#e88a7a');
+        if (window.Sfx && p && cerca(w, p[0], p[1], 12)) Sfx.play('dado');
+        break;
+      }
+      case 'canal': {
+        const p = posDe(m.id);
+        if (p && window.Effects) Effects.number(p[0], p[1], '*GOLPES*', '#e8c95a');
+        if (window.Sfx && p && cerca(w, p[0], p[1], 12)) Sfx.play('golpe');
+        break;
+      }
+      case 'canalFin': break;
+      case 'abierto': {
+        const ex = w.map.exits[m.i];
+        if (!ex) return;
+        ex.def._abierta = true;
+        w.mapaVersion = (w.mapaVersion || 0) + 1; // el render reconstruye el hueco
+        if (cerca(w, ex.x, ex.y, 14)) {
+          w.log('Algo se DERRUMBA: un camino nuevo queda abierto.', 'good');
+          if (window.Sfx) Sfx.play('derrumbe');
+          if (window.Effects) Effects.doShake(5, 220);
+        }
+        break;
+      }
+      case 'oferta':
+        w.ui.showChoice('Una salida', `${m.texto}.`, [
+          { label: 'CRUZAR', cb: () => enviar({ t: 'cruzar', si: true }) },
+          { label: 'Aún no', cb: () => enviar({ t: 'cruzar', si: false }) },
+        ]);
+        break;
+
+      // ---------- escondites y luz ----------
+      case 'esconde':
+        if (m.id === miId) {
+          w.escondido = m.si ? { delatado: false } : null;
+          if (m.si) w.log('Te metes dentro. Contén la respiración.', 'good');
+        } else Otros.esconde(m.id, m.si);
+        break;
+      case 'luzDe': Otros.luz(m.id, m.si); break;
+
       case 'aviso': w.log(m.txt, 'event'); break;
       case 'error': w.log(m.txt, 'danger'); break;
     }
   }
 
-  function nombreDe(id) {
-    const o = Otros.lista.find((x) => x.id === id);
-    return o ? o.nombre : '???';
+  function cerca(w, x, y, r) {
+    return Math.abs(x - w.player.x) + Math.abs(y - w.player.y) <= r;
   }
 
-  // Construye el mundo compartido: jugador/HUD por el camino de siempre
-  // (startRun) y encima el mapa determinista de la sala.
-  function construirMundo(m, w) {
-    miId = m.id;
-    Game.startRun(m.semilla);               // jugador, HUD, tarjeta del nivel
+  // Construye el estado local de una sala: mapa desde la semilla + estado
+  // dinámico que la semilla no puede saber (entidades, objetos cogidos,
+  // grietas ya abiertas, censo de jugadores).
+  function construirNivel(m, w) {
     const def = w.data.levels[m.nivel];
     w.online = true;
     w.level = def;
-    w.map = MapGen.generate(def, RNG.create(m.semilla));
+    // MISMA transformación que hace el servidor (sim/mundo.js→defParaOnline):
+    // online las salidas aparecen siempre — el campo `prob` era del modo solo
+    const defOnline = {
+      ...def,
+      salidas: (def.salidas || []).map((s) => { const c = { ...s }; delete c.prob; return c; }),
+    };
+    w.map = MapGen.generate(defOnline, RNG.create(m.semilla));
     w.tiles = Tiles.build(def, RNG.create(m.semilla + '::tiles'));
-    w.entities = [];        // M2: llegarán del servidor
-    w.map.items = [];       // M2: ídem
-    w.map.caminatas = [];   // la caminata online (M3) será personal, no local
+    w.map.caminatas = []; // la caminata online (M3) es personal
+    for (const i of m.itemsTomados || []) if (w.map.items[i]) w.map.items[i].taken = true;
+    for (const i of m.abiertas || []) if (w.map.exits[i]) w.map.exits[i].def._abierta = true;
+    w.entities = (m.ents || []).map((e) => ({
+      uid: e.uid, id: e.id, def: w.data.entities[e.id],
+      x: e.x, y: e.y, rx: e.x, ry: e.y,
+      viva: e.viva, revelada: e.revelada,
+      preparando: false, paralizada: 0, huyendo: 0, vida: 1,
+    }));
     w.player.x = m.x; w.player.y = m.y;
     w.player.rx = m.x; w.player.ry = m.y;
     w.player.rot = m.rot ?? 2;
+    w.player.salud = m.salud ?? 100;
+    w.player.inv = m.inv || [];
+    w.player.manos = m.manos || [null, null];
+    w.escondido = null;
     w._ignoraExit = null;
+    w.itemsVersion = (w.itemsVersion || 0) + 1;
+    w.mapaVersion = (w.mapaVersion || 0) + 1;
+    const g = w.map.grid;
+    w.explored = new Uint8Array(g.w * g.h);
+    w.light = new Float32Array(g.w * g.h);
     fov(w);
     Otros.reset(miId);
     for (const j of m.jugadores) Otros.entra(j);
     listo = true;
-    w.log(`Estás en ${def.nombre} · instancia ${m.inst}. Pulsa T para hablar.`, 'good');
-    crearChatUI();
   }
 
   function fov(w) {
@@ -122,23 +288,21 @@
   // ---------- movimiento con predicción local ----------
   function mover(dx, dy) {
     const w = Game.world;
-    if (!listo || w.escondido) return;
+    if (!listo) return;
     const ahora = performance.now();
     if (ahora - ultPaso < COOLDOWN) return;
     ultPaso = ahora;
     const nx = w.player.x + dx, ny = w.player.y + dy;
-    if (MapGen.walkable(MapGen.at(w.map.grid, nx, ny))) {
-      w.player.x = nx; w.player.y = ny;   // predicción: el servidor confirma o corrige
+    if (!w.escondido && MapGen.walkable(MapGen.at(w.map.grid, nx, ny))) {
+      w.player.x = nx; w.player.y = ny; // predicción: el servidor confirma o corrige
       fov(w);
     }
     enviar({ t: 'mover', dx, dy });
   }
 
-  // en tercera persona W avanza y S retrocede según la rotación (giro gratis)
   function avanzar(s) {
     const w = Game.world;
     const [dx, dy] = ROT_VEC[w.player.rot];
-    // el sprite/cámara del retroceso no gira (mismo criterio que Game.avanzar)
     mover(dx * s, dy * s);
   }
 
@@ -148,13 +312,22 @@
     enviar({ t: 'rot', rot: w.player.rot });
   }
 
-  // movimiento 2D directo (flechas en ?render=2d / cámara alta)
   function moverPantalla(dx, dy) {
     const w = Game.world;
     if (dy > 0) w.player.dir = 'down';
     else if (dy < 0) w.player.dir = 'up';
     else if (dx !== 0) { w.player.dir = 'side'; w.player.flip = dx < 0; }
     mover(dx, dy);
+  }
+
+  // ---------- acciones ----------
+  function accion() { enviar({ t: 'accion' }); }           // ESPACIO
+  function usar(mano) { enviar({ t: 'usar', mano }); }     // Q/E
+
+  function luzToggle() {
+    const w = Game.world;
+    w.player.luz = !w.player.luz;
+    enviar({ t: 'luz', si: w.player.luz });
   }
 
   // ---------- chat ----------
@@ -199,6 +372,7 @@
 
   window.Net = {
     iniciar, mover, avanzar, girar, moverPantalla,
+    accion, usar, luzToggle,
     abrirChat, chatAbierto,
     get activo() { return listo; },
     get id() { return miId; },

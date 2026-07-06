@@ -1356,6 +1356,7 @@
       const camDir = CAM_MODO === 'tercera' ? p.rot : ((4 - camRot) % 4);
       for (const o of world.otros) {
         vivos.add(o.id);
+        if (o.escondido) { const sE = otrosSprites.get(o.id); if (sE) sE.visible = false; continue; }
         let s = otrosSprites.get(o.id);
         if (!s) {
           s = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true }));
@@ -1366,6 +1367,7 @@
         const [sid2, flip2] = Otros.spriteDe(o, camDir);
         const f2 = (Math.abs(o.rx - o.x) + Math.abs(o.ry - o.y) > 0.03)
           ? Math.floor(t / 150) % Sprites.frameCount(sid2) : 0;
+        s.visible = true;
         s.material.map = spriteTexFlip(sid2, f2, flip2);
         s.material.needsUpdate = true;
         s.position.set(o.rx + 0.5, SPRITE_H / 2 + 0.02, o.ry + 0.5);

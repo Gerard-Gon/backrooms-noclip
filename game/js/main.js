@@ -175,16 +175,24 @@
       } else if (ev.code === 'KeyT' || ev.code === 'Enter') {
         ev.preventDefault();
         Net.abrirChat();
-      } else if (ev.code === 'KeyF') Game.toggleLuz();
+      } else if (ev.code === 'Space') {
+        ev.preventDefault();
+        Net.accion(); // contextual: esconderse, romper, reabrir la oferta de salida
+      } else if (ev.code === 'KeyQ' || ev.code === 'KeyE') {
+        if (tercera || !use3D) Net.usar(ev.code === 'KeyQ' ? 0 : 1);
+        else Render3D.rotar(ev.code === 'KeyQ' ? 1 : -1);
+      } else if (ev.code === 'KeyF') Net.luzToggle();
+      else if (ev.code === 'KeyB') world.ui.toggleBackpack();
       else if (ev.code === 'KeyL') world.ui.toggleLog();
       else if (ev.code === 'KeyC') world.ui.toggleCodex();
       else if (ev.code === 'KeyM' || ev.code === 'KeyN') Minimap.toggleBig();
       else if (ev.code === 'Escape') {
         if (Minimap.visible) Minimap.toggleBig(false);
+        else if (document.getElementById('backpack-panel').style.display !== 'none') world.ui.toggleBackpack(false);
         else if (sndMenu.style.display !== 'none') cerrarSndMenu();
         else abrirSndMenu();
       }
-      // (Espacio/X/Q/E/G/B/1-6 llegan en M2 con el mundo interactivo)
+      // (X/G/1-6 y la mochila interactiva llegan en M3)
       return;
     }
     const autoRepeatTime2DMove = 150; // tiempo en ms mínimo entre pasos al mantener pulsada una tecla de movimiento en modo 2D

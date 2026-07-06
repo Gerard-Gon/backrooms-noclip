@@ -7,19 +7,20 @@ const WebSocket = require('ws');
 
 const N = parseInt(process.argv[2], 10) || 50;
 const URL = process.argv[3] || 'ws://localhost:8080/ws';
+const NIVEL = process.argv[4] || undefined; // p. ej. level-1 (prueba de entidades)
 const FRASES = [
   'hola?', '¿alguien más oye el zumbido?', 'por aquí hay una grieta',
   'seguidme', 'me pierdo', 'este pasillo no estaba antes', 'corred',
   'llevo horas caminando', 'qué es ESO', 'las luces parpadean',
 ];
 
-let conectados = 0, movidos = 0, chats = 0;
+let conectados = 0, movidos = 0, chats = 0, cruces = 0;
 
 function bot(i) {
   const ws = new WebSocket(URL);
   ws.on('open', () => {
     conectados++;
-    ws.send(JSON.stringify({ t: 'hola', nombre: `Bot-${i}`, token: `bot-${i}`, v: 1 }));
+    ws.send(JSON.stringify({ t: 'hola', nombre: `Bot-${i}`, token: `bot-${i}`, v: 1, nivel: NIVEL }));
     const paso = setInterval(() => {
       if (ws.readyState !== 1) { clearInterval(paso); return; }
       const dir = [[0, -1], [0, 1], [-1, 0], [1, 0]][Math.floor(Math.random() * 4)];
@@ -30,6 +31,20 @@ function bot(i) {
         chats++;
       }
     }, 170 + Math.random() * 160);
+  });
+  ws.on('message', (raw) => {
+    let m;
+    try { m = JSON.parse(raw); } catch (e) { return; }
+    // a veces cruzan la salida que pisan: prueba el cambio de sala en caliente
+    if (m.t === 'oferta') {
+      setTimeout(() => {
+        if (ws.readyState === 1) ws.send(JSON.stringify({ t: 'cruzar', si: Math.random() < 0.3 }));
+      }, 300);
+      cruces++;
+    }
+    if (m.t === 'aviso' && /ESPACIO/.test(m.txt) && Math.random() < 0.5) {
+      ws.send(JSON.stringify({ t: 'accion' })); // intenta romper la grieta
+    }
   });
   ws.on('error', (e) => console.error(`bot ${i}:`, e.message));
   ws.on('close', () => { conectados--; });

@@ -710,6 +710,7 @@
     // del mapa — suficiente para el render de respaldo
     if (window.Otros && world.otros) {
       for (const o of world.otros) {
+        if (o.escondido) continue;
         const ox = o.rx * TILE - cam.x, oy = o.ry * TILE - cam.y;
         if (ox < -TILE || oy < -TILE || ox > W + TILE || oy > H + TILE) continue;
         const dir = o.rot === 0 ? 'up' : o.rot === 2 ? 'down' : 'side';

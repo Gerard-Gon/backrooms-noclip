@@ -38,6 +38,7 @@ function leer(raw) {
     case 'hola':
       if (typeof m.nombre !== 'string' || typeof m.token !== 'string') return null;
       if (m.token.length > 64) return null;
+      if (m.nivel !== undefined && (typeof m.nivel !== 'string' || m.nivel.length > 32)) return null;
       return m;
     case 'mover': {
       const dx = m.dx | 0, dy = m.dy | 0;
@@ -52,6 +53,17 @@ function leer(raw) {
     case 'chat':
       if (typeof m.txt !== 'string') return null;
       return { t: 'chat', txt: m.txt.slice(0, MAX_CHAT) };
+    case 'accion':
+      return { t: 'accion' };                         // ESPACIO contextual
+    case 'cruzar':
+      return { t: 'cruzar', si: !!m.si };             // respuesta a una oferta de salida
+    case 'usar': {
+      const mano = m.mano | 0;
+      if (mano !== 0 && mano !== 1) return null;
+      return { t: 'usar', mano };                     // Q/E: tubería o linterna
+    }
+    case 'luz':
+      return { t: 'luz', si: !!m.si };                // F: linterna encendida/apagada
     case 'ping':
       return { t: 'ping' };
     default:
