@@ -177,9 +177,22 @@
   let isWaitingForButton = false;
   let currentActionToMap = null;
 
+  let openedFromSndMenu = false;
   if (btnGamepadSettings) {
     btnGamepadSettings.onclick = () => {
+      openedFromSndMenu = true;
       sndMenu.style.display = 'none';
+      gamepadMenu.style.display = 'flex';
+      optCursorSpeed.value = OPTS.cursorSpeed;
+      optCursorSpeedV.textContent = OPTS.cursorSpeed;
+      renderGamepadList();
+    };
+  }
+
+  const btnGamepadTitle = document.getElementById('btn-gamepad-title');
+  if (btnGamepadTitle) {
+    btnGamepadTitle.onclick = () => {
+      openedFromSndMenu = false;
       gamepadMenu.style.display = 'flex';
       optCursorSpeed.value = OPTS.cursorSpeed;
       optCursorSpeedV.textContent = OPTS.cursorSpeed;
@@ -199,7 +212,7 @@
   if (btnGamepadClose) {
     btnGamepadClose.onclick = () => {
       gamepadMenu.style.display = 'none';
-      abrirSndMenu();
+      if (openedFromSndMenu) abrirSndMenu();
     };
   }
 
