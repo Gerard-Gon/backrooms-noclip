@@ -70,7 +70,7 @@
   const ICONOS_INV = {
     agua_almendras: 'refresco', botiquin: 'botiquin', linterna: 'linterna',
     chaqueta: 'chaqueta', amuleto: 'cuadro', llave_nivel: 'llave',
-    tuberia: 'tuberia', fuego_griego: 'fuego', sal_fuego: 'fuego', guante_paralisis: 'guante',
+    tuberia: 'tuberia', fuego_griego: 'fuego', guante_paralisis: 'guante',
     detector: 'antena', trebol: 'trebol',
     mascara_gas: 'mascara', botas_reforzadas: 'bota',
   };

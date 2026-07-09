@@ -269,25 +269,11 @@
       case 'golpe': {
         const p = posDe(m.id);
         if (p) {
-          const dist = Math.abs(p[0] - m.x) + Math.abs(p[1] - m.y);
-          if (dist > 0.5) {
-            // Es un proyectil de Sal de fuego arrojado!
-            if (window.Effects) {
-              Effects.proyectil(p[0], p[1], m.x, m.y, '#ff5500');
-              setTimeout(() => {
-                Effects.doShake(8, 250);
-                Effects.flash(m.x, m.y, '#ff5500');
-                Effects.particles(m.x, m.y, '#ff3300', 25);
-              }, 380);
-            }
-            if (window.Sfx && cerca(w, m.x, m.y, 14)) Sfx.play('golpe');
-          } else {
-            // Golpe a corta distancia (tubería, etc.)
-            if (window.Effects) {
-              Effects.flash(m.x, m.y, '#e8c95a');
-            }
-            if (window.Sfx && cerca(w, m.x, m.y, 12)) Sfx.play('golpe');
+          // Golpe a corta distancia (tubería, etc.)
+          if (window.Effects) {
+            Effects.flash(m.x, m.y, '#e8c95a');
           }
+          if (window.Sfx && cerca(w, m.x, m.y, 12)) Sfx.play('golpe');
         }
         break;
       }
@@ -521,7 +507,7 @@
 
   // ---------- botín INDIVIDUAL (v25): cajas, dado y suelo en TU navegador ----------
   const POOL_CAJAS = ['agua_almendras', 'agua_almendras', 'botiquin', 'amuleto', 'linterna',
-    'chaqueta', 'mascara_gas', 'botas_reforzadas', 'tuberia', 'fuego_griego', 'sal_fuego', 'guante_paralisis', 'trebol'];
+    'chaqueta', 'mascara_gas', 'botas_reforzadas', 'tuberia', 'fuego_griego', 'guante_paralisis', 'trebol'];
 
   function guardarCaja(w, pr) {
     try {
